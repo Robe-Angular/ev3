@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C, SpeedPercent, Stop
+from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C, SpeedPercent
 from ev3dev2.sensor.lego import ColorSensor, TouchSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
 from ev3dev2.sound import Sound
@@ -178,7 +178,7 @@ try:
 
         # Start/Stop con Touch (pausa/salida rápida)
         if touch.is_pressed:
-            lm.stop(Stop.BRAKE); rm.stop(Stop.BRAKE)
+            lm.stop('brake'); rm.stop('brake')
             snd.beep()
             # Espera otra pulsación para continuar o mantenlo presionado >1.2s para salir
             t_press = time.time()
@@ -193,7 +193,7 @@ try:
 except KeyboardInterrupt:
     pass
 finally:
-    lm.stop(Stop.BRAKE); rm.stop(Stop.BRAKE)
+    lm.stop('brake'); rm.stop('brake')
     leds.all_off()
     snd.speak('Acknowledged H.Q.')
     print("CSV:", csv_path)
