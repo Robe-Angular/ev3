@@ -11,7 +11,6 @@ import time, os, csv
 # --------- Hardware ----------
 lm = LargeMotor(OUTPUT_B)
 rm = LargeMotor(OUTPUT_C)
-# Configura el modo de paro de los motores (tu versión lo lee como propiedad)
 lm.stop_action = 'brake'
 rm.stop_action = 'brake'
 csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
@@ -22,174 +21,171 @@ snd = Sound(); leds = Leds()
 
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
-BASE_MAX = 12     # % máx en rectas
-BASE_MIN = 6     # % mínimo en curvas duras
-K_SPEED  = 28     # cuánto bajar por |error| (prueba 8..18)
+BASE_MAX = 12      # % en rectas
+BASE_MIN = 6       # % en curvas duras
+K_SPEED  = 24      # caída por |err| (suave = 18..28)
 
-# Control PD sobre posición (centroide): error en [-1,1]
-KP = 45.0         # 60..140 (ajusta fino)
-KD = 14.0          # 4..16   (amortigua quiebres)
-DT = 0.04         # 20 ms (50 Hz)
+# Control PD (realmente PD; integral NO para evitar windup)
+KP = 45.0          # 40..120
+KD = 12.0          # 6..16
+TURN_CLAMP   = 50  # tope giro
+SPEED_CLAMP  = 55  # tope motor
+MOTOR_GAIN   = 0.60
+MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
 
-# Saturación del giro y de los motores
-TURN_CLAMP   = 50          # tope de mando diferencial
-SPEED_CLAMP  = 55          # tope absoluto de % a motor
+# Señal de giro por si queda invertido (+1 o -1)
+TURN_SIGN    = +1  # si gira al revés, pon -1
 
-# Umbrales para perder/encontrar línea (valores 0..100 de reflectancia)
-# Si usas pista negra sobre blanco: "negro" ≈ 5..20, "blanco" ≈ 60..90
-BLACK_MAX = 35     # <= negro
-WHITE_MIN = 55     # >= blanco
+# Línea perdida / esquina usando NORMALIZADOS
+# (0 ~ negro línea, 1 ~ blanco fondo tras calibración)
+LINE_LOST_SUMW = 0.08      # si (wL+wC+wR)<esto ⇒ casi todo blanco
+CORNER_DEEP    = 0.20      # “muy negro” ~ <0.20
+CORNER_CLEAR   = 0.70      # “muy blanco” ~ >0.70
+PIVOT_SPEED    = 10
+SEARCH_SPEED   = 8
 
-# Detección de esquinas: patrón "uno muy negro, los otros muy blancos"
-CORNER_DIFF = 15   # contraste mínimo para considerar giro agresivo
-PIVOT_SPEED = 10   # % velocidad al pivotear en esquina
-SEARCH_SPEED = 8  # % velocidad en búsqueda (cuando se pierde la línea)
-
-# Escala global de mando (freno extra)
-MOTOR_GAIN = 0.60   # 60% de lo calculado
+# Derivativo suavizado (filtro exponencial)
+D_ALPHA        = 0.35
 
 # --------- Utils ----------
 def clamp(x, lo, hi):
     return lo if x < lo else hi if x > hi else x
 
 def wait_press_release(t):
-    while not t.is_pressed:
-        time.sleep(0.01)
-    while t.is_pressed:
-        time.sleep(0.01)
+    while not t.is_pressed: time.sleep(0.01)
+    while t.is_pressed:     time.sleep(0.01)
 
-# Normaliza 0..1 usando blanco/negro fijos simples (rápido y práctico)
-# n=0 ~ negro (línea), n=1 ~ blanco (fondo)
-def normalize(v):
-    lo = 10.0     # estima negro típico; afina si quieres
-    hi = 90.0     # estima blanco típico; afina si quieres
-    n = (v - lo) / max(1.0, (hi - lo))
-    if n < 0: n = 0.0
-    if n > 1: n = 1.0
-    return n
+# Calibración por sensor (blanco/negro)
+def calibrate():
+    leds.set_color('LEFT','YELLOW'); leds.set_color('RIGHT','YELLOW')
+    snd.speak('Place on white and press.')
+    wait_press_release(touch)
+    wL, wC, wR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
 
-# Rampa: limita el cambio máximo por ciclo (suaviza el mando)
+    snd.speak('Place on black and press.')
+    wait_press_release(touch)
+    bL, bC, bR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
+
+    # evita (hi==lo)
+    if abs(wL-bL) < 5: wL = bL + 5
+    if abs(wC-bC) < 5: wC = bC + 5
+    if abs(wR-bR) < 5: wR = bR + 5
+    leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
+    return (bL,wL),(bC,wC),(bR,wR)
+
+def norm(v, lo, hi):
+    d = float(hi-lo); 
+    if d < 1: d = 1.0
+    x = (v - lo)/d
+    if x < 0: x = 0.0
+    if x > 1: x = 1.0
+    return x
+
 def slew(prev_cmd, target_cmd, max_delta):
-    if target_cmd > prev_cmd + max_delta:
-        return prev_cmd + max_delta
-    if target_cmd < prev_cmd - max_delta:
-        return prev_cmd - max_delta
+    if target_cmd > prev_cmd + max_delta: return prev_cmd + max_delta
+    if target_cmd < prev_cmd - max_delta: return prev_cmd - max_delta
     return target_cmd
 
 # --------- Inicio / CSV ----------
 ts = time.strftime("%Y%m%d_%H%M%S")
 log_dir = "/home/robot/logs"
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
+os.makedirs(log_dir, exist_ok=True)
 csv_path = os.path.join(log_dir, "ev3_log_" + str(ts) + ".csv")
 f = open(csv_path, "w", newline="")
 writer = csv.writer(f)
-writer.writerow(["t","L","C","R","pos","err","derr","base","cmdL","cmdR"])
+writer.writerow(["t","L","C","R","pos","err","derr","steer","base","cmdL","cmdR"])
 
-snd.speak('Comm-link online.')
-leds.set_color('LEFT','RED'); leds.set_color('RIGHT','RED')
+snd.speak('Calibrating.')
+calibL, calibC, calibR = calibrate()
+snd.speak('Tap to start.')
 wait_press_release(touch)
-snd.speak('Go ahead, Taccom.')
+snd.speak('Go.')
 leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
 
-t0 = time.time()
+t_prev = time.time()
+t0 = t_prev
 prev_err = 0.0
-last_seen_dir = 0          # -1 izquierda, +1 derecha (para búsqueda)
+d_filt = 0.0
+last_seen_dir = 0
 running = True
 prev_cmdL = 0.0
 prev_cmdR = 0.0
-MAX_DELTA = 60.0   # % máximo de cambio por ciclo
 
 try:
-    
     while running:
-        # stop con botón BACK del brick (triángulo)
-        # ev3dev2 no tiene Button() simple aquí; usa ctrl+c si no
-        # (si quieres BACK, dímelo y lo integro con ev3dev2.button)
-
-        # Lee reflectancias crudas 0..100
+        # Lecturas crudas
         Lr = csL.reflected_light_intensity
         Cr = csC.reflected_light_intensity
         Rr = csR.reflected_light_intensity
 
-        # Normaliza a 0..1 (0 negro línea, 1 blanco)
-        L = normalize(Lr); C = normalize(Cr); R = normalize(Rr)
+        # Normaliza 0..1 (0 negro, 1 blanco)
+        L = norm(Lr, *calibL)
+        C = norm(Cr, *calibC)
+        R = norm(Rr, *calibR)
 
-        # Peso "línea" como 1-n (más peso si más oscuro)
-        wL = 1.0 - L; wC = 1.0 - C; wR = 1.0 - R
+        # Pesos de "oscuridad" (línea)
+        wL, wC, wR = 1.0-L, 1.0-C, 1.0-R
         sumw = wL + wC + wR
 
-        # Detección de “línea perdida”
-        line_lost = (sumw < 0.10)  # casi todo blanco
-        # Detección de esquina (una muy negra y las otras claras)
-        corner_left  = (Lr <= BLACK_MAX and Cr >= WHITE_MIN and Rr >= WHITE_MIN and (Cr - Lr) >= CORNER_DIFF)
-        clamped = Cr - Rr
-        corner_right = (Rr <= BLACK_MAX and Cr >= WHITE_MIN and Lr >= WHITE_MIN and clamped >= CORNER_DIFF)
+        # DT real
+        t_now = time.time()
+        DT = max(0.01, t_now - t_prev)   # evita DT=0
+        t_prev = t_now
 
-        # ---- antes del if grande ----
-        cmdL_target = 0.0
-        cmdR_target = 0.0
+        # Estados especiales (con NORMALIZADOS)
+        line_lost = (sumw < LINE_LOST_SUMW)
+        corner_left  = (L <= CORNER_DEEP and C >= CORNER_CLEAR and R >= CORNER_CLEAR)
+        corner_right = (R <= CORNER_DEEP and C >= CORNER_CLEAR and L >= CORNER_CLEAR)
+
+        # Defaults para log
+        pos = 0.0; err = 0.0; derr = 0.0; steer = 0.0; base = BASE_MIN
+        cmdL_target = 0.0; cmdR_target = 0.0
 
         if corner_left:
-            # Pivot agresivo hacia la izquierda
             cmdL_target = -PIVOT_SPEED
             cmdR_target = +PIVOT_SPEED
             last_seen_dir = -1
-            pos = -1.0; err = 1.0  # log aproximado
-            derr = 0.0
-            base = PIVOT_SPEED
         elif corner_right:
-            # Pivot agresivo hacia la derecha
             cmdL_target = +PIVOT_SPEED
             cmdR_target = -PIVOT_SPEED
             last_seen_dir = +1
-            pos = +1.0; err = -1.0
-            derr = 0.0
-            base = PIVOT_SPEED
         elif line_lost:
-            # Búsqueda: gira suave hacia el último lado visto
+            # búsqueda hacia el último lugar donde se "vio" más oscuro
             turn = SEARCH_SPEED
             if last_seen_dir <= 0:
-                cmdL_target = -turn
-                cmdR_target = +turn
+                cmdL_target = -turn; cmdR_target = +turn
             else:
-                cmdL_target = +turn
-                cmdR_target = -turn
-            pos = 0.0; err = 0.0; derr = 0.0; base = SEARCH_SPEED
+                cmdL_target = +turn; cmdR_target = -turn
+            base = SEARCH_SPEED
         else:
-            # Centroide en posiciones -1 (L), 0 (C), +1 (R)
-            # pos en [-1,1], 0 = centrado en sensor central
-            pos = (-1.0*wL + 0.0*wC + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
-
-            # Error = deseado(0) - pos → tomamos err = -pos para girar hacia la línea
-            err = -pos
-            derr = (err - prev_err) / DT
+            # Centroide: -1 (L), 0 (C), +1 (R)
+            pos = (-1.0*wL + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
+            # Error (0 deseado)
+            err = -pos  # si gira al revés, cambia a err = +pos
+            # Derivativo con filtro
+            d_raw = (err - prev_err) / DT
+            d_filt = (1.0 - D_ALPHA)*d_filt + D_ALPHA*d_raw
+            derr = d_filt
             prev_err = err
 
-            # Velocidad base cae con |error| (más curva = más lento)
+            # Velocidad base adaptativa
             base = BASE_MAX - K_SPEED * abs(err)
-            if C < 0.35 and base > (BASE_MIN + 1):
+            if C < 0.35 and base > (BASE_MIN + 1):  # si centro ve negro → precaución
                 base = BASE_MIN + 1
-            if base < BASE_MIN:
-                base = BASE_MIN
-            if base > BASE_MAX:
-                base = BASE_MAX
+            base = clamp(base, BASE_MIN, BASE_MAX)
 
-            # Mando diferencial PD
-            turn = KP * err + KD * derr
-            if turn < -TURN_CLAMP:
-                turn = -TURN_CLAMP
-            if turn > TURN_CLAMP:
-                turn = TURN_CLAMP
+            # PID (aquí PD) + posible inversión
+            steer = TURN_SIGN * (KP*err + KD*derr)
+            steer = clamp(steer, -TURN_CLAMP, TURN_CLAMP)
 
-            # Cálculo de velocidades ideales
-            cmdL_target = base - turn / 2.0
-            cmdR_target = base + turn / 2.0
+            # Diferencial
+            cmdL_target = base - steer/2.0
+            cmdR_target = base + steer/2.0
 
-            # Memoriza hacia dónde “vi” más peso por si se pierde
+            # Recuerda hacia dónde había más "negro"
             last_seen_dir = -1 if (wL > wR and wL > wC) else (+1 if (wR > wL and wR > wC) else last_seen_dir)
 
-        # ---- bloque común de salida (siempre) ----
+        # Salida común
         cmdL_target = clamp(cmdL_target, -SPEED_CLAMP, SPEED_CLAMP)
         cmdR_target = clamp(cmdR_target, -SPEED_CLAMP, SPEED_CLAMP)
 
@@ -202,35 +198,32 @@ try:
 
         # Log
         writer.writerow([
-            round(time.time()-t0,3),
+            round(t_now - t0,3),
             int(Lr), int(Cr), int(Rr),
             round(pos,3), round(err,3), round(derr,3),
+            round(steer,3),
             int(base),
-            int(lm.speed_sp) if hasattr(lm,'speed_sp') else 0,
-            int(rm.speed_sp) if hasattr(rm,'speed_sp') else 0
+            round(cmdL,1), round(cmdR,1)
         ])
         f.flush()
 
-        # Start/Stop con Touch (pausa/salida rápida)
+        # Touch: pausa/salida
         if touch.is_pressed:
-            lm.on(SpeedPercent(0)); rm.on(SpeedPercent(0))
             lm.stop(); rm.stop()
-            snd.beep()
-            # Espera otra pulsación para continuar o mantenlo presionado >1.2s para salir
             t_press = time.time()
             wait_press_release(touch)
             if time.time() - t_press > 1.2:
                 running = False
                 break
-            snd.beep()
 
-        time.sleep(DT)
+        # target ~25 Hz
+        time.sleep(max(0.0, 0.04 - (time.time()-t_now)))
 
 except KeyboardInterrupt:
     pass
 finally:
-    lm.on(SpeedPercent(0)); rm.on(SpeedPercent(0))
     lm.stop(); rm.stop()
     leds.all_off()
     snd.speak('Acknowledged H.Q.')
+    f.close()
     print("CSV:", csv_path)
