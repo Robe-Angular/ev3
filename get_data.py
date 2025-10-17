@@ -98,7 +98,7 @@ last_seen_dir = 0          # -1 izquierda, +1 derecha (para búsqueda)
 running = True
 prev_cmdL = 0.0
 prev_cmdR = 0.0
-MAX_DELTA = 5.0   # % máximo de cambio por ciclo
+MAX_DELTA = 60.0   # % máximo de cambio por ciclo
 
 try:
     
