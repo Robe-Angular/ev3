@@ -22,9 +22,9 @@ snd = Sound(); leds = Leds()
 
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
-BASE_MAX = 18     # % máx en rectas
-BASE_MIN = 8     # % mínimo en curvas duras
-K_SPEED  = 22     # cuánto bajar por |error| (prueba 8..18)
+BASE_MAX = 12     # % máx en rectas
+BASE_MIN = 4     # % mínimo en curvas duras
+K_SPEED  = 25     # cuánto bajar por |error| (prueba 8..18)
 
 # Control PD sobre posición (centroide): error en [-1,1]
 KP = 55.0         # 60..140 (ajusta fino)
