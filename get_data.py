@@ -58,11 +58,11 @@ def wait_press_release(t):
 # Calibración por sensor (blanco/negro)
 def calibrate():
     leds.set_color('LEFT','YELLOW'); leds.set_color('RIGHT','YELLOW')
-    snd.speak('Place on white and press.')
+    snd.speak('Nav-comm locked')
     wait_press_release(touch)
     wL, wC, wR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
 
-    snd.speak('Place on black and press.')
+    snd.speak('Target designated.')
     wait_press_release(touch)
     bL, bC, bR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
 
@@ -95,11 +95,11 @@ f = open(csv_path, "w", newline="")
 writer = csv.writer(f)
 writer.writerow(["t","L","C","R","pos","err","derr","steer","base","cmdL","cmdR"])
 
-snd.speak('Calibrating.')
+snd.speak('Comm-link online.')
 calibL, calibC, calibR = calibrate()
-snd.speak('Tap to start.')
+snd.speak('Systems functional.')
 wait_press_release(touch)
-snd.speak('Go.')
+snd.speak('Go ahead, TACCOM.')
 leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
 
 t_prev = time.time()
