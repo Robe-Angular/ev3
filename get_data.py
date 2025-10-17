@@ -22,28 +22,28 @@ snd = Sound(); leds = Leds()
 
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
-BASE_MAX = 40     # % máx en rectas
-BASE_MIN = 18     # % mínimo en curvas duras
-K_SPEED  = 12     # cuánto bajar por |error| (prueba 8..18)
+BASE_MAX = 18     # % máx en rectas
+BASE_MIN = 8     # % mínimo en curvas duras
+K_SPEED  = 22     # cuánto bajar por |error| (prueba 8..18)
 
 # Control PD sobre posición (centroide): error en [-1,1]
-KP = 90.0         # 60..140 (ajusta fino)
-KD = 8.0          # 4..16   (amortigua quiebres)
-DT = 0.02         # 20 ms (50 Hz)
+KP = 55.0         # 60..140 (ajusta fino)
+KD = 12.0          # 4..16   (amortigua quiebres)
+DT = 0.03         # 20 ms (50 Hz)
 
 # Saturación del giro y de los motores
-TURN_CLAMP   = 80          # tope de mando diferencial
-SPEED_CLAMP  = 80          # tope absoluto de % a motor
+TURN_CLAMP   = 50          # tope de mando diferencial
+SPEED_CLAMP  = 55          # tope absoluto de % a motor
 
 # Umbrales para perder/encontrar línea (valores 0..100 de reflectancia)
 # Si usas pista negra sobre blanco: "negro" ≈ 5..20, "blanco" ≈ 60..90
 BLACK_MAX = 35     # <= negro
-WHITE_MIN = 45     # >= blanco
+WHITE_MIN = 55     # >= blanco
 
 # Detección de esquinas: patrón "uno muy negro, los otros muy blancos"
-CORNER_DIFF = 20   # contraste mínimo para considerar giro agresivo
-PIVOT_SPEED = 22   # % velocidad al pivotear en esquina
-SEARCH_SPEED = 18  # % velocidad en búsqueda (cuando se pierde la línea)
+CORNER_DIFF = 15   # contraste mínimo para considerar giro agresivo
+PIVOT_SPEED = 12   # % velocidad al pivotear en esquina
+SEARCH_SPEED = 10  # % velocidad en búsqueda (cuando se pierde la línea)
 
 # --------- Utils ----------
 def clamp(x, lo, hi):
@@ -65,6 +65,14 @@ def normalize(v):
     if n > 1: n = 1.0
     return n
 
+# Rampa: limita el cambio máximo por ciclo (suaviza el mando)
+def slew(prev_cmd, target_cmd, max_delta):
+    if target_cmd > prev_cmd + max_delta:
+        return prev_cmd + max_delta
+    if target_cmd < prev_cmd - max_delta:
+        return prev_cmd - max_delta
+    return target_cmd
+
 # --------- Inicio / CSV ----------
 ts = time.strftime("%Y%m%d_%H%M%S")
 log_dir = "/home/robot/logs"
@@ -78,13 +86,16 @@ writer.writerow(["t","L","C","R","pos","err","derr","base","cmdL","cmdR"])
 snd.speak('Comm-link online.')
 leds.set_color('LEFT','RED'); leds.set_color('RIGHT','RED')
 wait_press_release(touch)
-snd.speak('Confirmed.')
+snd.speak('Go ahead, Taccom.')
 leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
 
 t0 = time.time()
 prev_err = 0.0
 last_seen_dir = 0          # -1 izquierda, +1 derecha (para búsqueda)
 running = True
+prev_cmdL = 0.0
+prev_cmdR = 0.0
+MAX_DELTA = 5.0   # % máximo de cambio por ciclo
 
 try:
     while running:
@@ -149,21 +160,37 @@ try:
 
             # Velocidad base cae con |error| (más curva = más lento)
             base = BASE_MAX - K_SPEED * abs(err)
-            if base < BASE_MIN: base = BASE_MIN
-            if base > BASE_MAX: base = BASE_MAX
+            if base < BASE_MIN:
+                base = BASE_MIN
+            if base > BASE_MAX:
+                base = BASE_MAX
 
             # Mando diferencial PD
-            turn = KP*err + KD*derr
-            if turn < -TURN_CLAMP: turn = -TURN_CLAMP
-            if turn >  TURN_CLAMP: turn =  TURN_CLAMP
+            turn = KP * err + KD * derr
+            if turn < -TURN_CLAMP:
+                turn = -TURN_CLAMP
+            if turn > TURN_CLAMP:
+                turn = TURN_CLAMP
 
-            cmdL = base - turn/2.0
-            cmdR = base + turn/2.0
-            cmdL = clamp(cmdL, -SPEED_CLAMP, SPEED_CLAMP)
-            cmdR = clamp(cmdR, -SPEED_CLAMP, SPEED_CLAMP)
+            # Cálculo de velocidades ideales
+            cmdL_target = base - turn / 2.0
+            cmdR_target = base + turn / 2.0
 
+            # Limita por saturación
+            cmdL_target = clamp(cmdL_target, -SPEED_CLAMP, SPEED_CLAMP)
+            cmdR_target = clamp(cmdR_target, -SPEED_CLAMP, SPEED_CLAMP)
+
+            # ======== Rampa (slew limiter) ========
+            # Usa los valores previos y limita el cambio por ciclo
+            cmdL = clamp(slew(prev_cmdL, cmdL_target, MAX_DELTA), -SPEED_CLAMP, SPEED_CLAMP)
+            cmdR = clamp(slew(prev_cmdR, cmdR_target, MAX_DELTA), -SPEED_CLAMP, SPEED_CLAMP)
+            prev_cmdL, prev_cmdR = cmdL, cmdR
+            # ======================================
+
+            # Enviar a motores
             lm.on(SpeedPercent(cmdL))
             rm.on(SpeedPercent(cmdR))
+
 
             # Memoriza hacia dónde “vi” más peso por si se pierde
             last_seen_dir = -1 if (wL > wR and wL > wC) else (+1 if (wR > wL and wR > wC) else last_seen_dir)
@@ -198,7 +225,7 @@ except KeyboardInterrupt:
     pass
 finally:
     lm.on(SpeedPercent(0)); rm.on(SpeedPercent(0))
-    lm.stop(); lm.stop()
+    lm.stop(); rm.stop()
     leds.all_off()
     snd.speak('Acknowledged H.Q.')
     print("CSV:", csv_path)
