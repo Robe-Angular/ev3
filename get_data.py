@@ -72,10 +72,10 @@ f = open(csv_path, "w", newline="")
 writer = csv.writer(f)
 writer.writerow(["t","L","C","R","pos","err","derr","base","cmdL","cmdR"])
 
-snd.speak('Executor?')
+snd.speak('Comm-link online.')
 leds.set_color('LEFT','RED'); leds.set_color('RIGHT','RED')
 wait_press_release(touch)
-snd.speak('Your command?')
+snd.speak('Confirmed.')
 leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
 
 t0 = time.time()
@@ -105,7 +105,8 @@ try:
         line_lost = (sumw < 0.10)  # casi todo blanco
         # Detección de esquina (una muy negra y las otras claras)
         corner_left  = (Lr <= BLACK_MAX and Cr >= WHITE_MIN and Rr >= WHITE_MIN and (Cr - Lr) >= CORNER_DIFF)
-        corner_right = (Rr <= BLACK_MAX and Cr >= WHITE_MIN and Lr >= WHITE_MIN and (Clamped := (Cr - Rr)) >= CORNER_DIFF)
+        clamped = Cr - Rr
+        corner_right = (Rr <= BLACK_MAX and Cr >= WHITE_MIN and Lr >= WHITE_MIN and clamped >= CORNER_DIFF)
 
         if corner_left:
             # Pivot agresivo hacia la izquierda
@@ -194,5 +195,5 @@ except KeyboardInterrupt:
 finally:
     lm.stop(Stop.BRAKE); rm.stop(Stop.BRAKE)
     leds.all_off()
-    snd.speak('I hunger for battle...')
+    snd.speak('Acknowledged H.Q.')
     print("CSV:", csv_path)
