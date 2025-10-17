@@ -181,7 +181,8 @@ try:
 
         # Start/Stop con Touch (pausa/salida rápida)
         if touch.is_pressed:
-            lm.stop(); lm.stop()
+            lm.on(SpeedPercent(0)); rm.on(SpeedPercent(0))
+            lm.stop(); rm.stop()
             snd.beep()
             # Espera otra pulsación para continuar o mantenlo presionado >1.2s para salir
             t_press = time.time()
@@ -196,6 +197,7 @@ try:
 except KeyboardInterrupt:
     pass
 finally:
+    lm.on(SpeedPercent(0)); rm.on(SpeedPercent(0))
     lm.stop(); lm.stop()
     leds.all_off()
     snd.speak('Acknowledged H.Q.')
