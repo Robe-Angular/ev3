@@ -168,6 +168,8 @@ try:
 
             # Velocidad base cae con |error| (más curva = más lento)
             base = BASE_MAX - K_SPEED * abs(err)
+            if C < 0.35 and base > (BASE_MIN + 1):
+                base = BASE_MIN + 1
             if base < BASE_MIN:
                 base = BASE_MIN
             if base > BASE_MAX:
