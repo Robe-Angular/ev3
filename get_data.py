@@ -11,6 +11,9 @@ import time, os, csv
 # --------- Hardware ----------
 lm = LargeMotor(OUTPUT_B)
 rm = LargeMotor(OUTPUT_C)
+# Configura el modo de paro de los motores (tu versión lo lee como propiedad)
+lm.stop_action = 'brake'
+rm.stop_action = 'brake'
 csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
 csC = ColorSensor(INPUT_2); csC.mode = 'COL-REFLECT'
 csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
@@ -178,7 +181,7 @@ try:
 
         # Start/Stop con Touch (pausa/salida rápida)
         if touch.is_pressed:
-            lm.stop('brake'); rm.stop('brake')
+            lm.stop(); lm.stop()
             snd.beep()
             # Espera otra pulsación para continuar o mantenlo presionado >1.2s para salir
             t_press = time.time()
@@ -193,7 +196,7 @@ try:
 except KeyboardInterrupt:
     pass
 finally:
-    lm.stop('brake'); rm.stop('brake')
+    lm.stop(); lm.stop()
     leds.all_off()
     snd.speak('Acknowledged H.Q.')
     print("CSV:", csv_path)
