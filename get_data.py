@@ -33,7 +33,8 @@ DT         = 0.02        # periodo de muestreo (s) ~50 Hz
 ts   = time.strftime("%Y%m%d_%H%M%S")
 log_dir = "/home/robot/logs"
 os.makedirs(log_dir, exist_ok=True)
-csv_path = os.path.join(log_dir, f"ev3_log_{ts}.csv")
+
+csv_path = os.path.join(log_dir, "ev3_log_" + str(ts) + ".csv")
 
 # ----- Instancias de hardware -----
 lm = LargeMotor(LEFT_MOTOR_PORT)
