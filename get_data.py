@@ -23,13 +23,13 @@ snd = Sound(); leds = Leds()
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
 BASE_MAX = 12     # % máx en rectas
-BASE_MIN = 4     # % mínimo en curvas duras
-K_SPEED  = 25     # cuánto bajar por |error| (prueba 8..18)
+BASE_MIN = 6     # % mínimo en curvas duras
+K_SPEED  = 28     # cuánto bajar por |error| (prueba 8..18)
 
 # Control PD sobre posición (centroide): error en [-1,1]
-KP = 55.0         # 60..140 (ajusta fino)
-KD = 12.0          # 4..16   (amortigua quiebres)
-DT = 0.03         # 20 ms (50 Hz)
+KP = 45.0         # 60..140 (ajusta fino)
+KD = 14.0          # 4..16   (amortigua quiebres)
+DT = 0.04         # 20 ms (50 Hz)
 
 # Saturación del giro y de los motores
 TURN_CLAMP   = 50          # tope de mando diferencial
@@ -42,8 +42,11 @@ WHITE_MIN = 55     # >= blanco
 
 # Detección de esquinas: patrón "uno muy negro, los otros muy blancos"
 CORNER_DIFF = 15   # contraste mínimo para considerar giro agresivo
-PIVOT_SPEED = 12   # % velocidad al pivotear en esquina
-SEARCH_SPEED = 10  # % velocidad en búsqueda (cuando se pierde la línea)
+PIVOT_SPEED = 10   # % velocidad al pivotear en esquina
+SEARCH_SPEED = 8  # % velocidad en búsqueda (cuando se pierde la línea)
+
+# Escala global de mando (freno extra)
+MOTOR_GAIN = 0.60   # 60% de lo calculado
 
 # --------- Utils ----------
 def clamp(x, lo, hi):
@@ -98,6 +101,7 @@ prev_cmdR = 0.0
 MAX_DELTA = 5.0   # % máximo de cambio por ciclo
 
 try:
+    
     while running:
         # stop con botón BACK del brick (triángulo)
         # ev3dev2 no tiene Button() simple aquí; usa ctrl+c si no
@@ -122,18 +126,22 @@ try:
         clamped = Cr - Rr
         corner_right = (Rr <= BLACK_MAX and Cr >= WHITE_MIN and Lr >= WHITE_MIN and clamped >= CORNER_DIFF)
 
+        # ---- antes del if grande ----
+        cmdL_target = 0.0
+        cmdR_target = 0.0
+
         if corner_left:
             # Pivot agresivo hacia la izquierda
-            lm.on(SpeedPercent(-PIVOT_SPEED))
-            rm.on(SpeedPercent(+PIVOT_SPEED))
+            cmdL_target = -PIVOT_SPEED
+            cmdR_target = +PIVOT_SPEED
             last_seen_dir = -1
             pos = -1.0; err = 1.0  # log aproximado
             derr = 0.0
             base = PIVOT_SPEED
         elif corner_right:
             # Pivot agresivo hacia la derecha
-            lm.on(SpeedPercent(+PIVOT_SPEED))
-            rm.on(SpeedPercent(-PIVOT_SPEED))
+            cmdL_target = +PIVOT_SPEED
+            cmdR_target = -PIVOT_SPEED
             last_seen_dir = +1
             pos = +1.0; err = -1.0
             derr = 0.0
@@ -142,11 +150,11 @@ try:
             # Búsqueda: gira suave hacia el último lado visto
             turn = SEARCH_SPEED
             if last_seen_dir <= 0:
-                lm.on(SpeedPercent(-turn))
-                rm.on(SpeedPercent(+turn))
+                cmdL_target = -turn
+                cmdR_target = +turn
             else:
-                lm.on(SpeedPercent(+turn))
-                rm.on(SpeedPercent(-turn))
+                cmdL_target = +turn
+                cmdR_target = -turn
             pos = 0.0; err = 0.0; derr = 0.0; base = SEARCH_SPEED
         else:
             # Centroide en posiciones -1 (L), 0 (C), +1 (R)
@@ -176,24 +184,19 @@ try:
             cmdL_target = base - turn / 2.0
             cmdR_target = base + turn / 2.0
 
-            # Limita por saturación
-            cmdL_target = clamp(cmdL_target, -SPEED_CLAMP, SPEED_CLAMP)
-            cmdR_target = clamp(cmdR_target, -SPEED_CLAMP, SPEED_CLAMP)
-
-            # ======== Rampa (slew limiter) ========
-            # Usa los valores previos y limita el cambio por ciclo
-            cmdL = clamp(slew(prev_cmdL, cmdL_target, MAX_DELTA), -SPEED_CLAMP, SPEED_CLAMP)
-            cmdR = clamp(slew(prev_cmdR, cmdR_target, MAX_DELTA), -SPEED_CLAMP, SPEED_CLAMP)
-            prev_cmdL, prev_cmdR = cmdL, cmdR
-            # ======================================
-
-            # Enviar a motores
-            lm.on(SpeedPercent(cmdL))
-            rm.on(SpeedPercent(cmdR))
-
-
             # Memoriza hacia dónde “vi” más peso por si se pierde
             last_seen_dir = -1 if (wL > wR and wL > wC) else (+1 if (wR > wL and wR > wC) else last_seen_dir)
+
+        # ---- bloque común de salida (siempre) ----
+        cmdL_target = clamp(cmdL_target, -SPEED_CLAMP, SPEED_CLAMP)
+        cmdR_target = clamp(cmdR_target, -SPEED_CLAMP, SPEED_CLAMP)
+
+        cmdL = clamp(slew(prev_cmdL, cmdL_target, MAX_DELTA), -SPEED_CLAMP, SPEED_CLAMP)
+        cmdR = clamp(slew(prev_cmdR, cmdR_target, MAX_DELTA), -SPEED_CLAMP, SPEED_CLAMP)
+        prev_cmdL, prev_cmdR = cmdL, cmdR
+
+        lm.on(SpeedPercent(cmdL * MOTOR_GAIN))
+        rm.on(SpeedPercent(cmdR * MOTOR_GAIN))
 
         # Log
         writer.writerow([
