@@ -132,6 +132,16 @@ writer.writerow(["t","L","C","R","pos","err","derr","steer","base","cmdL","cmdR"
 
 snd.speak('Comm-link online.')
 calibL, calibC, calibR = calibrate()
+
+# --- TEST RÁPIDO: línea bajo el sensor IZQUIERDO (1s, sin mover el robot) ---
+print("TEST IZQ: coloca la LÍNEA bajo el sensor IZQUIERDO (L) durante ~1s...")
+t_test = time.time()
+while time.time() - t_test < 1.0:
+    Lr = csL.reflected_light_intensity
+    Rr = csR.reflected_light_intensity
+    print("Lr=", Lr, "  Rr=", Rr)
+    time.sleep(0.1)
+
 snd.speak('Systems functional.')
 wait_press_release(touch)
 snd.speak('Go ahead, TACCOM.')
@@ -172,21 +182,30 @@ try:
 
         # Estados especiales (con NORMALIZADOS)
         line_lost = (sumw < LINE_LOST_SUMW)
-        corner_left  = (L <= CORNER_DEEP and C >= CORNER_CLEAR and R >= CORNER_CLEAR)
-        corner_right = (R <= CORNER_DEEP and C >= CORNER_CLEAR and L >= CORNER_CLEAR)
+        # esquina si EXACTAMENTE un sensor está muy negro
+        darkL = (L <= CORNER_DEEP); darkC = (C <= CORNER_DEEP); darkR = (R <= CORNER_DEEP)
+        is_corner = (darkL + darkC + darkR) == 1 and (L >= CORNER_CLEAR or C >= CORNER_CLEAR or R >= CORNER_CLEAR)
+
+        # por si tu pivot sale invertido
+        CORNER_SIGN = +1  # si ves que pivotea al lado opuesto, pon -1
 
         # Defaults para log
         pos = 0.0; err = 0.0; derr = 0.0; steer = 0.0; base = BASE_MIN
         cmdL_target = 0.0; cmdR_target = 0.0
 
-        if corner_left:
-            cmdL_target = -PIVOT_SPEED
-            cmdR_target = +PIVOT_SPEED
-            last_seen_dir = -1
-        elif corner_right:
-            cmdL_target = +PIVOT_SPEED
-            cmdR_target = -PIVOT_SPEED
-            last_seen_dir = +1
+        # arriba, cerca de tus estados
+        corner_hold = 0.0
+        CORNER_MIN_TIME = 0.12  # 120 ms
+
+        if is_corner:
+            # lado con más "negro" (peso alto = 1 - n)
+            side = +1 if (wR > wL) else -1   # +1 = línea a la derecha, -1 = a la izquierda
+            # pivot: derecha => L+, R- ; izquierda => L-, R+
+            cmdL_target =  CORNER_SIGN * ( side * PIVOT_SPEED)
+            cmdR_target =  CORNER_SIGN * (-side * PIVOT_SPEED)
+            last_seen_dir = side
+            pos = side * 1.0; err = -pos; derr = 0.0; base = PIVOT_SPEED
+            corner_hold += DT
         elif line_lost:
             # búsqueda hacia el último lugar donde se "vio" más oscuro
             turn = SEARCH_SPEED
@@ -222,6 +241,7 @@ try:
 
             # Recuerda hacia dónde había más "negro"
             last_seen_dir = -1 if (wL > wR and wL > wC) else (+1 if (wR > wL and wR > wC) else last_seen_dir)
+            corner_hold = 0.0
 
         # Salida común
         cmdL_target = clamp(cmdL_target, -SPEED_CLAMP, SPEED_CLAMP)
