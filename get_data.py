@@ -282,7 +282,7 @@ try:
 
                 dpos = (pos - locals().get('pos_prev', pos)) / DT
                 pos_prev = pos
-                err  = +pos
+                err  = -pos
                 derr = -dpos   # derivada sobre medición → amortigua mejor
 
                 base = clamp(BASE_MAX - K_SPEED*abs(err), BASE_MIN, BASE_MAX)
@@ -324,7 +324,7 @@ try:
             base = fwd
             cmdL_target = fwd + diff/2.0
             cmdR_target = fwd - diff/2.0
-            pos = side * 1.0; err = -pos; derr = 0.0; steer = diff  # solo para log
+            pos = side * 1.0; err = pos; derr = 0.0; steer = diff  # solo para log
 
             # criterios de salida: mínimo tiempo + ya no corner o centro toca línea o timeout
             center_on_line = (C <= 0.50)       # ajusta si tu línea es gris
