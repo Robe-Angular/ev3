@@ -99,7 +99,7 @@ def calibrate():
     if C_norm > LINE_ON_CENTER_MAX:
         snd.speak('Center validation failed. Recalibrate.')
         leds.set_color('LEFT','RED'); leds.set_color('RIGHT','RED')
-        print("❌ El sensor central NO ve negro suficiente. Repite calibración (ajusta altura/luz).")
+        print("El sensor central NO ve negro suficiente. Repite calibración (ajusta altura/luz).")
         return calibrate()
 
     leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
@@ -134,7 +134,7 @@ snd.speak('Comm-link online.')
 calibL, calibC, calibR = calibrate()
 
 # --- TEST RÁPIDO: línea bajo el sensor IZQUIERDO (1s, sin mover el robot) ---
-print("TEST IZQ: coloca la LÍNEA bajo el sensor IZQUIERDO (L) durante ~1s...")
+print("TEST IZQ: coloca la LiNEA bajo el sensor IZQUIERDO (L) durante 1s...")
 t_test = time.time()
 while time.time() - t_test < 1.0:
     Lr = csL.reflected_light_intensity
