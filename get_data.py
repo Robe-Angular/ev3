@@ -33,6 +33,13 @@ SPEED_CLAMP  = 55  # tope motor
 MOTOR_GAIN   = 1.00
 MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
 
+# Esquina aguda (dos sensores negros)
+HARD_DEEP   = 0.28   # 0..1 (negro). Sube a 0.32 si tu negro es muy oscuro
+HARD_CLEAR  = 0.65   # 0..1 (blanco). Baja a 0.60 si el fondo es gris
+HARD_MIN_HOLD = 0.28 # s de compromiso mínimo (más que corner normal)
+HARD_ARC_FWD  = 8    # % avance en el arco duro
+HARD_ARC_DIFF = 14   # % diferencial para morder el giro duro
+
 # Señal de giro por si queda invertido (+1 o -1)
 TURN_SIGN    = +1  # si gira al revés, pon -1
 
@@ -185,10 +192,15 @@ lm.on(SpeedPercent(15)); rm.on(SpeedPercent(15))
 time.sleep(0.5)
 lm.stop(); rm.stop()
 
-
+corner_is_hard = False
 
 try:
     while running:
+
+        # --- detección hard-turn (dos sensores contiguos muy negros) ---
+        hard_left  = (L <= HARD_DEEP and C <= HARD_DEEP and R >= HARD_CLEAR)
+        hard_right = (R <= HARD_DEEP and C <= HARD_DEEP and L >= HARD_CLEAR)
+
         # Lecturas crudas
         Lr = csL.reflected_light_intensity
         Cr = csC.reflected_light_intensity
@@ -229,8 +241,15 @@ try:
             # por defecto (por si no hay rama), inicializa salidas “neutras”
             pos = 0.0; err = 0.0; derr = 0.0; steer = 0.0; base = BASE_MIN
             cmdL_target = 0.0; cmdR_target = 0.0
-
-            if is_corner:
+            # PRIORIDAD: hard-turn
+            if hard_left or hard_right:
+                corner_side = -1 if hard_left else +1
+                last_seen_dir = corner_side
+                state = STATE_CORNER
+                corner_hold = 0.0
+                # etiqueta este corner como "duro" guardando params en locals
+                corner_is_hard = True
+            elif is_corner:
                 corner_side = +1 if (wR > wL) else -1
                 last_seen_dir = corner_side          # <--- añade esto
                 state = STATE_CORNER
@@ -277,8 +296,16 @@ try:
             corner_hold += DT
             # arco de escape: un poco adelante + diferencial fuerte hacia el lado
             side = corner_side  # -1 izq, +1 der
-            fwd  = CORNER_ARC_FWD
-            diff = CORNER_ARC_DIFF * side
+
+
+            if corner_is_hard:
+                fwd  = HARD_ARC_FWD
+                diff = HARD_ARC_DIFF * side
+                min_hold = HARD_MIN_HOLD
+            else:
+                fwd  = CORNER_ARC_FWD
+                diff = CORNER_ARC_DIFF * side
+                min_hold = CORNER_MIN_HOLD
 
             base = fwd
             cmdL_target = fwd + diff/2.0
@@ -287,7 +314,7 @@ try:
 
             # criterios de salida: mínimo tiempo + ya no corner o centro toca línea o timeout
             center_on_line = (C <= 0.45)       # ajusta si tu línea es gris
-            not_corner_now = (not is_corner_raw)
+            not_corner_now = (not is_corner_raw) and (not hard_left) and (not hard_right)
              # --- ESTA ES LA LÍNEA CLAVE QUE PREGUNTAS ---
             if (corner_hold >= CORNER_MIN_HOLD and not_corner_now) or center_on_line or (corner_hold >= CORNER_MAX_HOLD):
                 state = STATE_NORMAL
@@ -295,6 +322,7 @@ try:
                 corner_hold = 0.0  # resetea el latch
                 # (opcional) recuerda el último lado visto:
                 last_seen_dir = side
+                corner_is_hard = False
 
         elif state == STATE_SEARCH:
             side = last_seen_dir if last_seen_dir != 0 else +1
