@@ -217,6 +217,10 @@ try:
         # --- detección hard-turn (dos sensores contiguos muy negros) ---
         hard_left  = (L <= HARD_DEEP and C <= HARD_DEEP and R >= HARD_CLEAR)
         hard_right = (R <= HARD_DEEP and C <= HARD_DEEP and L >= HARD_CLEAR)
+        # DT real
+        t_now = time.time()
+        DT = max(0.01, t_now - t_prev)   # evita DT=0
+        t_prev = t_now
 
         # Pesos de "oscuridad" (línea)
         wL, wC, wR = 1.0-L, 1.0-C, 1.0-R
@@ -233,10 +237,6 @@ try:
         d_wL_f, d_wR_f = d_wL, d_wR
 
         wL_prev, wR_prev = wL, wR
-        # DT real
-        t_now = time.time()
-        DT = max(0.01, t_now - t_prev)   # evita DT=0
-        t_prev = t_now
 
         # ----- detecciones básicas -----
         # Línea perdida robusta: los 3 ven muy blanco
