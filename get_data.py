@@ -268,7 +268,7 @@ try:
 
                 dpos = (pos - locals().get('pos_prev', pos)) / DT
                 pos_prev = pos
-                err  = -pos
+                err  = +pos
                 derr = -dpos   # derivada sobre medición → amortigua mejor
 
                 base = clamp(BASE_MAX - K_SPEED*abs(err), BASE_MIN, BASE_MAX)
