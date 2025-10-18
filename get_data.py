@@ -100,19 +100,6 @@ def calibrate():
     if wC <= bC: wC, bC = bC, wC
     if wR <= bR: wR, bR = bR, wR
 
-    d_wL = (wL - wL_prev) / DT
-    d_wR = (wR - wR_prev) / DT
-    # (opcional) suaviza un poco
-    DW_ALPHA = 0.4
-    try:
-        d_wL = (1.0 - DW_ALPHA)*d_wL_f + DW_ALPHA*d_wL
-        d_wR = (1.0 - DW_ALPHA)*d_wR_f + DW_ALPHA*d_wR
-    except NameError:
-        pass
-    d_wL_f, d_wR_f = d_wL, d_wR
-
-    wL_prev, wR_prev = wL, wR
-
     # Separación mínima de 5 puntos (evita hi==lo)
     MIN_DELTA = 5.0
     if abs(wL-bL) < MIN_DELTA: wL = bL + MIN_DELTA
@@ -234,7 +221,18 @@ try:
         # Pesos de "oscuridad" (línea)
         wL, wC, wR = 1.0-L, 1.0-C, 1.0-R
         sumw = wL + wC + wR
+        d_wL = (wL - wL_prev) / DT
+        d_wR = (wR - wR_prev) / DT
+        # (opcional) suaviza un poco
+        DW_ALPHA = 0.4
+        try:
+            d_wL = (1.0 - DW_ALPHA)*d_wL_f + DW_ALPHA*d_wL
+            d_wR = (1.0 - DW_ALPHA)*d_wR_f + DW_ALPHA*d_wR
+        except NameError:
+            pass
+        d_wL_f, d_wR_f = d_wL, d_wR
 
+        wL_prev, wR_prev = wL, wR
         # DT real
         t_now = time.time()
         DT = max(0.01, t_now - t_prev)   # evita DT=0
