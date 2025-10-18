@@ -93,7 +93,7 @@ def calibrate():
     # Normaliza C: 0=negro(línea), 1=blanco(fondo)
     C_norm = (midC - bC) / max(1.0, (wC - bC))
     C_norm = max(0.0, min(1.0, C_norm))
-    print(f"[VALID] C on LINE -> raw={midC:.1f} | norm={C_norm:.2f}")
+    print("[VALID] C on LINE -> raw={:.1f} | norm={:.2f}".format(midC, C_norm))
 
     LINE_ON_CENTER_MAX = 0.25  # si tu línea es clarita, sube a 0.30–0.35
     if C_norm > LINE_ON_CENTER_MAX:
@@ -104,7 +104,7 @@ def calibrate():
 
     leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
     snd.speak('Calibration OK.')
-    print(f"✅ Calibración OK. L: {bL:.1f}/{wL:.1f}  C: {bC:.1f}/{wC:.1f}  R: {bR:.1f}/{wR:.1f}")
+    print("✅ Calibración OK. L: {0:.1f}/{1:.1f}  C: {2:.1f}/{3:.1f}  R: {4:.1f}/{5:.1f}".format(bL, wL, bC, wC, bR, wR))
     return (bL,wL), (bC,wC), (bR,wR)
 
 
