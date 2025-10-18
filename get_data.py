@@ -197,9 +197,7 @@ corner_is_hard = False
 try:
     while running:
 
-        # --- detección hard-turn (dos sensores contiguos muy negros) ---
-        hard_left  = (L <= HARD_DEEP and C <= HARD_DEEP and R >= HARD_CLEAR)
-        hard_right = (R <= HARD_DEEP and C <= HARD_DEEP and L >= HARD_CLEAR)
+        
 
         # Lecturas crudas
         Lr = csL.reflected_light_intensity
@@ -210,6 +208,9 @@ try:
         L = norm(Lr, *calibL)
         C = norm(Cr, *calibC)
         R = norm(Rr, *calibR)
+        # --- detección hard-turn (dos sensores contiguos muy negros) ---
+        hard_left  = (L <= HARD_DEEP and C <= HARD_DEEP and R >= HARD_CLEAR)
+        hard_right = (R <= HARD_DEEP and C <= HARD_DEEP and L >= HARD_CLEAR)
 
         # Pesos de "oscuridad" (línea)
         wL, wC, wR = 1.0-L, 1.0-C, 1.0-R
