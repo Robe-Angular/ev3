@@ -21,17 +21,17 @@ snd = Sound(); leds = Leds()
 
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
-BASE_MAX = 20      # % en rectas
-BASE_MIN = 12       # % en curvas duras
-K_SPEED  = 16      # caída por |err| (suave = 18..28)
+BASE_MAX = 16      # % en rectas
+BASE_MIN = 10       # % en curvas duras
+K_SPEED  = 22      # caída por |err| (suave = 18..28)
 
 # Control PD (realmente PD; integral NO para evitar windup)
-KP = 45.0          # 40..120
-KD = 10.0          # 6..16
-TURN_CLAMP   = 40  # tope giro
+KP = 32.0          # 40..120
+KD = 14.0          # 6..16
+TURN_CLAMP   = 30  # tope giro
 SPEED_CLAMP  = 55  # tope motor
 MOTOR_GAIN   = 1.00
-MAX_DELTA    = 8.0 # rampa real (ANTES 60 → demasiado alto)
+MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Señal de giro por si queda invertido (+1 o -1)
 TURN_SIGN    = +1  # si gira al revés, pon -1
@@ -39,10 +39,18 @@ TURN_SIGN    = +1  # si gira al revés, pon -1
 # Línea perdida / esquina usando NORMALIZADOS
 # (0 ~ negro línea, 1 ~ blanco fondo tras calibración)
 LINE_LOST_SUMW = 0.08      # si (wL+wC+wR)<esto ⇒ casi todo blanco
-CORNER_DEEP    = 0.20      # “muy negro” ~ <0.20
-CORNER_CLEAR   = 0.70      # “muy blanco” ~ >0.70
 PIVOT_SPEED    = 10
 SEARCH_SPEED   = 8
+
+# --- Esquinas robustas ---
+CORNER_DEEP      = 0.22   # lado muy negro (0..1 normalizado)
+CORNER_CLEAR     = 0.75   # los otros muy blancos
+CORNER_DEBOUNCE  = 0.12   # s que debe durar la condición para aceptar esquina
+CORNER_MIN_HOLD  = 0.18   # s que nos quedamos en modo esquina como mínimo
+CORNER_MAX_HOLD  = 0.60   # s de seguridad para no quedarnos atrapados
+CORNER_PIVOT     = 9      # % base para pivot
+CORNER_ARC_FWD   = 7      # % componente hacia adelante para escapar
+CORNER_ARC_DIFF  = 12     # % diferencial para “morder” la esquina
 
 # Derivativo suavizado (filtro exponencial)
 D_ALPHA        = 0.35
@@ -159,6 +167,17 @@ prev_cmdR = 0.0
 lm.on(SpeedPercent(15)); rm.on(SpeedPercent(15))
 time.sleep(0.5)
 lm.stop(); rm.stop()
+
+STATE_NORMAL = 0
+STATE_CORNER = 1
+STATE_SEARCH = 2
+
+state = STATE_NORMAL
+corner_deb = 0.0    # acumula tiempo de condición de esquina
+corner_hold = 0.0   # tiempo dentro del estado esquina (latch)
+corner_side = 0     # -1 izquierda, +1 derecha
+
+
 try:
     while running:
         # Lecturas crudas
@@ -180,68 +199,110 @@ try:
         DT = max(0.01, t_now - t_prev)   # evita DT=0
         t_prev = t_now
 
-        # Estados especiales (con NORMALIZADOS)
+        # ----- detecciones básicas -----
         line_lost = (sumw < LINE_LOST_SUMW)
-        # esquina si EXACTAMENTE un sensor está muy negro
+
+        # “esquina cruda”: exactamente 1 muy negro y alguno muy blanco
         darkL = (L <= CORNER_DEEP); darkC = (C <= CORNER_DEEP); darkR = (R <= CORNER_DEEP)
-        is_corner = (darkL + darkC + darkR) == 1 and (L >= CORNER_CLEAR or C >= CORNER_CLEAR or R >= CORNER_CLEAR)
+        clearL = (L >= CORNER_CLEAR); clearC = (C >= CORNER_CLEAR); clearR = (R >= CORNER_CLEAR)
+        is_corner_raw = ((darkL + darkC + darkR) == 1) and (clearL or clearC or clearR)
 
-        # por si tu pivot sale invertido
-        CORNER_SIGN = +1  # si ves que pivotea al lado opuesto, pon -1
-
-        # Defaults para log
-        pos = 0.0; err = 0.0; derr = 0.0; steer = 0.0; base = BASE_MIN
-        cmdL_target = 0.0; cmdR_target = 0.0
-
-        # arriba, cerca de tus estados
-        corner_hold = 0.0
-        CORNER_MIN_TIME = 0.12  # 120 ms
-
-        if is_corner:
-            # lado con más "negro" (peso alto = 1 - n)
-            side = +1 if (wR > wL) else -1   # +1 = línea a la derecha, -1 = a la izquierda
-            # pivot: derecha => L+, R- ; izquierda => L-, R+
-            cmdL_target =  CORNER_SIGN * ( side * PIVOT_SPEED)
-            cmdR_target =  CORNER_SIGN * (-side * PIVOT_SPEED)
-            last_seen_dir = side
-            pos = side * 1.0; err = -pos; derr = 0.0; base = PIVOT_SPEED
-            corner_hold += DT
-        elif line_lost:
-            # búsqueda hacia el último lugar donde se "vio" más oscuro
-            turn = SEARCH_SPEED
-            if last_seen_dir <= 0:
-                cmdL_target = -turn; cmdR_target = +turn
-            else:
-                cmdL_target = +turn; cmdR_target = -turn
-            base = SEARCH_SPEED
+        # debounce de esquina (no uses latch aquí)
+        if is_corner_raw:
+            corner_deb += DT
         else:
-            # Centroide: -1 (L), 0 (C), +1 (R)
-            pos = (-1.0*wL + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
-            # Error (0 deseado)
-            err = -pos  # si gira al revés, cambia a err = +pos
-            # Derivativo con filtro
-            d_raw = (err - prev_err) / DT
-            d_filt = (1.0 - D_ALPHA)*d_filt + D_ALPHA*d_raw
-            derr = d_filt
-            prev_err = err
+            corner_deb = 0.0
 
-            # Velocidad base adaptativa
-            base = BASE_MAX - K_SPEED * abs(err)
-            # if C < 0.35 and base > (BASE_MIN + 1):  # si centro ve negro → precaución
-            #     base = BASE_MIN + 1
-            base = clamp(base, BASE_MIN, BASE_MAX)
+        is_corner = (corner_deb >= CORNER_DEBOUNCE)
 
-            # PID (aquí PD) + posible inversión
-            steer = TURN_SIGN * (KP*err + KD*derr)
-            steer = clamp(steer, -TURN_CLAMP, TURN_CLAMP)
+        # ----- FSM -----
+        if state == STATE_NORMAL:
+            # por defecto (por si no hay rama), inicializa salidas “neutras”
+            pos = 0.0; err = 0.0; derr = 0.0; steer = 0.0; base = BASE_MIN
+            cmdL_target = 0.0; cmdR_target = 0.0
 
-            # Diferencial
-            cmdL_target = base - steer/2.0
-            cmdR_target = base + steer/2.0
+            if is_corner:
+                # fijamos lado según el peso de oscuridad
+                corner_side = +1 if (wR > wL) else -1
+                state = STATE_CORNER
+                corner_hold = 0.0
+            elif line_lost:
+                state = STATE_SEARCH
+            else:
+                # ---------- PD normal ----------
+                pos_raw = (-1.0*wL + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
 
-            # Recuerda hacia dónde había más "negro"
-            last_seen_dir = -1 if (wL > wR and wL > wC) else (+1 if (wR > wL and wR > wC) else last_seen_dir)
-            corner_hold = 0.0
+                # suaviza posición (anti-ruido)
+                P_ALPHA = 0.30
+                try:
+                    pos = (1.0 - P_ALPHA)*pos + P_ALPHA*pos_raw
+                except NameError:
+                    pos = pos_raw
+
+                dpos = (pos - locals().get('pos_prev', pos)) / DT
+                pos_prev = pos
+                err  = -pos
+                derr = -dpos   # derivada sobre medición → amortigua mejor
+
+                base = clamp(BASE_MAX - K_SPEED*abs(err), BASE_MIN, BASE_MAX)
+
+                steer = TURN_SIGN * (KP*err + KD*derr)
+                steer = clamp(steer, -TURN_CLAMP, TURN_CLAMP)
+
+                # filtro simple al mando (reduce “baile”)
+                S_ALPHA = 0.40
+                try:
+                    steer = (1.0 - S_ALPHA)*steer_prev + S_ALPHA*steer
+                except NameError:
+                    pass
+                steer_prev = steer
+
+                if abs(steer) < 1.5:
+                    steer = 0.0
+
+                cmdL_target = base - steer/2.0
+                cmdR_target = base + steer/2.0
+
+                # recordar lado más oscuro por si toca SEARCH
+                if (wL > wR and wL > wC): last_seen_dir = -1
+                elif (wR > wL and wR > wC): last_seen_dir = +1
+
+        elif state == STATE_CORNER:
+            corner_hold += DT
+            # arco de escape: un poco adelante + diferencial fuerte hacia el lado
+            side = corner_side  # -1 izq, +1 der
+            fwd  = CORNER_ARC_FWD
+            diff = CORNER_ARC_DIFF * side
+
+            base = fwd
+            cmdL_target = fwd - diff/2.0
+            cmdR_target = fwd + diff/2.0
+            pos = side * 1.0; err = -pos; derr = 0.0; steer = diff  # solo para log
+
+            # criterios de salida: mínimo tiempo + ya no corner o centro toca línea o timeout
+            center_on_line = (C <= 0.45)       # ajusta si tu línea es gris
+            not_corner_now = (not is_corner_raw)
+             # --- ESTA ES LA LÍNEA CLAVE QUE PREGUNTAS ---
+            if (corner_hold >= CORNER_MIN_HOLD and not_corner_now) or center_on_line or (corner_hold >= CORNER_MAX_HOLD):
+                state = STATE_NORMAL
+                corner_deb = 0.0   # evita reenganchar de inmediato
+                corner_hold = 0.0  # resetea el latch
+                # (opcional) recuerda el último lado visto:
+                # last_seen_dir = side
+
+        elif state == STATE_SEARCH:
+            side = last_seen_dir if last_seen_dir != 0 else +1
+            turn = SEARCH_SPEED
+            base = SEARCH_SPEED
+            cmdL_target = -side * turn
+            cmdR_target =  side * turn
+            pos = 0.0; err = 0.0; derr = 0.0; steer = side*turn  # log
+
+            # sal de búsqueda si vemos línea o esquina
+            if sumw >= LINE_LOST_SUMW or is_corner:
+                state = STATE_NORMAL
+                corner_deb = 0.0
+
 
         # Salida común
         cmdL_target = clamp(cmdL_target, -SPEED_CLAMP, SPEED_CLAMP)
