@@ -104,7 +104,7 @@ def calibrate():
 
     leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
     snd.speak('Calibration OK.')
-    print("✅ Calibración OK. L: {0:.1f}/{1:.1f}  C: {2:.1f}/{3:.1f}  R: {4:.1f}/{5:.1f}".format(bL, wL, bC, wC, bR, wR))
+    print("Calibracion OK. L: {0:.1f}/{1:.1f}  C: {2:.1f}/{3:.1f}  R: {4:.1f}/{5:.1f}".format(bL, wL, bC, wC, bR, wR))
     return (bL,wL), (bC,wC), (bR,wR)
 
 
