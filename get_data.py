@@ -159,8 +159,7 @@ corner_side = 0     # -1 izquierda, +1 derecha
 
 # header
 writer.writerow(["t","L","C","R","pos","err","derr","steer","base","cmdL","cmdR","state"])
-# fila
-writer.writerow([... , state])
+
 
 snd.speak('Comm-link online.')
 calibL, calibC, calibR = calibrate()
@@ -317,7 +316,7 @@ try:
             center_on_line = (C <= 0.50)       # ajusta si tu línea es gris
             not_corner_now = (not is_corner_raw) and (not hard_left) and (not hard_right)
              # --- ESTA ES LA LÍNEA CLAVE QUE PREGUNTAS ---
-            if (corner_hold >= CORNER_MIN_HOLD and not_corner_now) or center_on_line or (corner_hold >= CORNER_MAX_HOLD):
+            if (corner_hold >= min_hold and not_corner_now) or center_on_line or (corner_hold >= CORNER_MAX_HOLD):
                 state = STATE_NORMAL
                 corner_deb = 0.0   # evita reenganchar de inmediato
                 corner_hold = 0.0  # resetea el latch
@@ -357,7 +356,8 @@ try:
             round(pos,3), round(err,3), round(derr,3),
             round(steer,3),
             int(base),
-            round(cmdL,1), round(cmdR,1)
+            round(cmdL,1), round(cmdR,1),
+            state
         ])
         f.flush()
 
