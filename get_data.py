@@ -21,17 +21,17 @@ snd = Sound(); leds = Leds()
 
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
-BASE_MAX = 12      # % en rectas
-BASE_MIN = 6       # % en curvas duras
-K_SPEED  = 24      # caída por |err| (suave = 18..28)
+BASE_MAX = 20      # % en rectas
+BASE_MIN = 12       # % en curvas duras
+K_SPEED  = 16      # caída por |err| (suave = 18..28)
 
 # Control PD (realmente PD; integral NO para evitar windup)
 KP = 45.0          # 40..120
-KD = 12.0          # 6..16
-TURN_CLAMP   = 50  # tope giro
+KD = 10.0          # 6..16
+TURN_CLAMP   = 40  # tope giro
 SPEED_CLAMP  = 55  # tope motor
-MOTOR_GAIN   = 0.60
-MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
+MOTOR_GAIN   = 1.00
+MAX_DELTA    = 8.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Señal de giro por si queda invertido (+1 o -1)
 TURN_SIGN    = +1  # si gira al revés, pon -1
@@ -55,23 +55,58 @@ def wait_press_release(t):
     while not t.is_pressed: time.sleep(0.01)
     while t.is_pressed:     time.sleep(0.01)
 
-# Calibración por sensor (blanco/negro)
+def _avg_reading(sensor, samples=8, delay=0.01):
+    s = 0.0
+    for _ in range(samples):
+        s += sensor.reflected_light_intensity
+        time.sleep(delay)
+    return s / samples
+
 def calibrate():
     leds.set_color('LEFT','YELLOW'); leds.set_color('RIGHT','YELLOW')
-    snd.speak('Nav-comm locked')
+    snd.speak('Place all sensors on WHITE, then press.')
     wait_press_release(touch)
-    wL, wC, wR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
+    wL = _avg_reading(csL); wC = _avg_reading(csC); wR = _avg_reading(csR)
 
-    snd.speak('Target designated.')
+    snd.speak('Place all sensors on BLACK line, then press.')
     wait_press_release(touch)
-    bL, bC, bR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
+    bL = _avg_reading(csL); bC = _avg_reading(csC); bR = _avg_reading(csR)
 
-    # evita (hi==lo)
-    if abs(wL-bL) < 5: wL = bL + 5
-    if abs(wC-bC) < 5: wC = bC + 5
-    if abs(wR-bR) < 5: wR = bR + 5
+    # Autocorrección si quedaron invertidos (por luz/altura)
+    if wL <= bL: wL, bL = bL, wL
+    if wC <= bC: wC, bC = bC, wC
+    if wR <= bR: wR, bR = bR, wR
+
+    # Separación mínima de 5 puntos (evita hi==lo)
+    MIN_DELTA = 5.0
+    if abs(wL-bL) < MIN_DELTA: wL = bL + MIN_DELTA
+    if abs(wC-bC) < MIN_DELTA: wC = bC + MIN_DELTA
+    if abs(wR-bR) < MIN_DELTA: wR = bR + MIN_DELTA
+
+    # --- Validación: línea bajo el sensor CENTRAL ---
+    leds.set_color('LEFT','ORANGE'); leds.set_color('RIGHT','ORANGE')
+    snd.speak('Center the BLACK line under CENTER sensor, then press.')
+    print(">>> Coloca la LINEA bajo el sensor CENTRAL y pulsa el touch... <<<")
+    wait_press_release(touch)
+    midC = _avg_reading(csC)
+
+    # Normaliza C: 0=negro(línea), 1=blanco(fondo)
+    C_norm = (midC - bC) / max(1.0, (wC - bC))
+    C_norm = max(0.0, min(1.0, C_norm))
+    print(f"[VALID] C on LINE -> raw={midC:.1f} | norm={C_norm:.2f}")
+
+    LINE_ON_CENTER_MAX = 0.25  # si tu línea es clarita, sube a 0.30–0.35
+    if C_norm > LINE_ON_CENTER_MAX:
+        snd.speak('Center validation failed. Recalibrate.')
+        leds.set_color('LEFT','RED'); leds.set_color('RIGHT','RED')
+        print("❌ El sensor central NO ve negro suficiente. Repite calibración (ajusta altura/luz).")
+        return calibrate()
+
     leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
-    return (bL,wL),(bC,wC),(bR,wR)
+    snd.speak('Calibration OK.')
+    print(f"✅ Calibración OK. L: {bL:.1f}/{wL:.1f}  C: {bC:.1f}/{wC:.1f}  R: {bR:.1f}/{wR:.1f}")
+    return (bL,wL), (bC,wC), (bR,wR)
+
 
 def norm(v, lo, hi):
     d = float(hi-lo); 
@@ -111,6 +146,9 @@ running = True
 prev_cmdL = 0.0
 prev_cmdR = 0.0
 
+lm.on(SpeedPercent(15)); rm.on(SpeedPercent(15))
+time.sleep(0.5)
+lm.stop(); rm.stop()
 try:
     while running:
         # Lecturas crudas
@@ -170,8 +208,8 @@ try:
 
             # Velocidad base adaptativa
             base = BASE_MAX - K_SPEED * abs(err)
-            if C < 0.35 and base > (BASE_MIN + 1):  # si centro ve negro → precaución
-                base = BASE_MIN + 1
+            # if C < 0.35 and base > (BASE_MIN + 1):  # si centro ve negro → precaución
+            #     base = BASE_MIN + 1
             base = clamp(base, BASE_MIN, BASE_MAX)
 
             # PID (aquí PD) + posible inversión
