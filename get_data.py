@@ -34,7 +34,7 @@ MOTOR_GAIN   = 1.00
 MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Señal de giro por si queda invertido (+1 o -1)
-TURN_SIGN    = -1  # si gira al revés, pon -1
+TURN_SIGN    = +1  # si gira al revés, pon -1
 
 # Línea perdida / esquina usando NORMALIZADOS
 # (0 ~ negro línea, 1 ~ blanco fondo tras calibración)
@@ -54,6 +54,9 @@ CORNER_ARC_DIFF  = 12     # % diferencial para “morder” la esquina
 
 # Derivativo suavizado (filtro exponencial)
 D_ALPHA        = 0.35
+P_ALPHA = 0.30   # suaviza pos
+S_ALPHA = 0.40   # suaviza mando de giro
+
 
 # --------- Utils ----------
 def clamp(x, lo, hi):
@@ -136,7 +139,21 @@ os.makedirs(log_dir, exist_ok=True)
 csv_path = os.path.join(log_dir, "ev3_log_" + str(ts) + ".csv")
 f = open(csv_path, "w", newline="")
 writer = csv.writer(f)
-writer.writerow(["t","L","C","R","pos","err","derr","steer","base","cmdL","cmdR"])
+
+
+STATE_NORMAL = 0
+STATE_CORNER = 1
+STATE_SEARCH = 2
+
+state = STATE_NORMAL
+corner_deb = 0.0    # acumula tiempo de condición de esquina
+corner_hold = 0.0   # tiempo dentro del estado esquina (latch)
+corner_side = 0     # -1 izquierda, +1 derecha
+
+# header
+writer.writerow(["t","L","C","R","pos","err","derr","steer","base","cmdL","cmdR","state"])
+# fila
+writer.writerow([... , state])
 
 snd.speak('Comm-link online.')
 calibL, calibC, calibR = calibrate()
@@ -168,14 +185,6 @@ lm.on(SpeedPercent(15)); rm.on(SpeedPercent(15))
 time.sleep(0.5)
 lm.stop(); rm.stop()
 
-STATE_NORMAL = 0
-STATE_CORNER = 1
-STATE_SEARCH = 2
-
-state = STATE_NORMAL
-corner_deb = 0.0    # acumula tiempo de condición de esquina
-corner_hold = 0.0   # tiempo dentro del estado esquina (latch)
-corner_side = 0     # -1 izquierda, +1 derecha
 
 
 try:
@@ -222,8 +231,8 @@ try:
             cmdL_target = 0.0; cmdR_target = 0.0
 
             if is_corner:
-                # fijamos lado según el peso de oscuridad
                 corner_side = +1 if (wR > wL) else -1
+                last_seen_dir = corner_side          # <--- añade esto
                 state = STATE_CORNER
                 corner_hold = 0.0
             elif line_lost:
@@ -232,8 +241,7 @@ try:
                 # ---------- PD normal ----------
                 pos_raw = (-1.0*wL + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
 
-                # suaviza posición (anti-ruido)
-                P_ALPHA = 0.30
+                
                 try:
                     pos = (1.0 - P_ALPHA)*pos + P_ALPHA*pos_raw
                 except NameError:
@@ -249,8 +257,6 @@ try:
                 steer = TURN_SIGN * (KP*err + KD*derr)
                 steer = clamp(steer, -TURN_CLAMP, TURN_CLAMP)
 
-                # filtro simple al mando (reduce “baile”)
-                S_ALPHA = 0.40
                 try:
                     steer = (1.0 - S_ALPHA)*steer_prev + S_ALPHA*steer
                 except NameError:
@@ -288,7 +294,7 @@ try:
                 corner_deb = 0.0   # evita reenganchar de inmediato
                 corner_hold = 0.0  # resetea el latch
                 # (opcional) recuerda el último lado visto:
-                # last_seen_dir = side
+                last_seen_dir = side
 
         elif state == STATE_SEARCH:
             side = last_seen_dir if last_seen_dir != 0 else +1
