@@ -275,8 +275,8 @@ try:
             diff = CORNER_ARC_DIFF * side
 
             base = fwd
-            cmdL_target = fwd - diff/2.0
-            cmdR_target = fwd + diff/2.0
+            cmdL_target = fwd + diff/2.0
+            cmdR_target = fwd - diff/2.0
             pos = side * 1.0; err = -pos; derr = 0.0; steer = diff  # solo para log
 
             # criterios de salida: mínimo tiempo + ya no corner o centro toca línea o timeout
