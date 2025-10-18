@@ -19,6 +19,11 @@ csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
 snd = Sound(); leds = Leds()
 
+# Línea perdida robusta
+CLEAR_TH     = 0.72   # "muy blanco" (0..1 normalizado)
+DARK_TH      = 0.28   # "negro" (0..1 normalizado)
+LINE_LOST_DEB = 0.12  # s que la condición debe mantenerse para declarar perdida
+REACQ_W      = 0.18   # peso mínimo (1-n) de cualquier sensor para decir "re-adquirí"
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
 BASE_MAX = 16      # % en rectas
@@ -50,9 +55,9 @@ PIVOT_SPEED    = 10
 SEARCH_SPEED   = 8
 
 # --- Esquinas robustas ---
-CORNER_DEEP      = 0.22   # lado muy negro (0..1 normalizado)
-CORNER_CLEAR     = 0.75   # los otros muy blancos
-CORNER_DEBOUNCE  = 0.12   # s que debe durar la condición para aceptar esquina
+CORNER_DEEP      = 0.20   # lado muy negro (0..1 normalizado)
+CORNER_CLEAR     = 0.80   # los otros muy blancos
+CORNER_DEBOUNCE  = 0.14   # s que debe durar la condición para aceptar esquina
 CORNER_MIN_HOLD  = 0.18   # s que nos quedamos en modo esquina como mínimo
 CORNER_MAX_HOLD  = 0.60   # s de seguridad para no quedarnos atrapados
 CORNER_PIVOT     = 9      # % base para pivot
@@ -64,7 +69,7 @@ D_ALPHA        = 0.35
 P_ALPHA = 0.30   # suaviza pos
 S_ALPHA = 0.40   # suaviza mando de giro
 
-
+line_lost_deb_timer = 0.0
 # --------- Utils ----------
 def clamp(x, lo, hi):
     return lo if x < lo else hi if x > hi else x
@@ -221,7 +226,16 @@ try:
         t_prev = t_now
 
         # ----- detecciones básicas -----
-        line_lost = (sumw < LINE_LOST_SUMW)
+        # Línea perdida robusta: los 3 ven muy blanco
+        line_lost_raw = (L >= CLEAR_TH and C >= CLEAR_TH and R >= CLEAR_TH)
+
+        # debounce para evitar parpadeos
+        if line_lost_raw:
+            line_lost_deb_timer += DT
+        else:
+            line_lost_deb_timer = 0.0
+
+        line_lost = (line_lost_deb_timer >= LINE_LOST_DEB)
 
         # “esquina cruda”: exactamente 1 muy negro y alguno muy blanco
         darkL = (L <= CORNER_DEEP); darkC = (C <= CORNER_DEEP); darkR = (R <= CORNER_DEEP)
@@ -328,14 +342,20 @@ try:
             side = last_seen_dir if last_seen_dir != 0 else +1
             turn = SEARCH_SPEED
             base = SEARCH_SPEED
-            cmdL_target = -side * turn
-            cmdR_target =  side * turn
+
+            # Pequeño avance + giro → espiral suave
+            FWD_SEARCH = 3.0  # % de "adelante" (ajusta 2..5)
+            cmdL_target = FWD_SEARCH - side * turn
+            cmdR_target = FWD_SEARCH + side * turn
+
             pos = 0.0; err = 0.0; derr = 0.0; steer = side*turn  # log
 
-            # sal de búsqueda si vemos línea o esquina
-            if sumw >= LINE_LOST_SUMW or is_corner:
+            # Sal de búsqueda si vemos "algo de línea" (cualquiera oscuro) o esquina
+            reacq = (wL >= REACQ_W) or (wC >= REACQ_W) or (wR >= REACQ_W)
+            if reacq or is_corner:
                 state = STATE_NORMAL
                 corner_deb = 0.0
+                line_lost_deb_timer = 0.0
 
 
         # Salida común
