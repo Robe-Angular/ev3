@@ -34,11 +34,11 @@ MOTOR_GAIN   = 1.00
 MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Esquina aguda (dos sensores negros)
-HARD_DEEP   = 0.28   # 0..1 (negro). Sube a 0.32 si tu negro es muy oscuro
-HARD_CLEAR  = 0.65   # 0..1 (blanco). Baja a 0.60 si el fondo es gris
-HARD_MIN_HOLD = 0.28 # s de compromiso mínimo (más que corner normal)
-HARD_ARC_FWD  = 8    # % avance en el arco duro
-HARD_ARC_DIFF = 14   # % diferencial para morder el giro duro
+HARD_DEEP      = 0.28     # 0..1 (negro). Sube a 0.32 si tu negro es muy oscuro
+HARD_CLEAR     = 0.65     # 0..1 (blanco). Baja a 0.60 si el fondo es gris
+HARD_MIN_HOLD  = 0.30     # s de compromiso mínimo (más que corner normal)
+HARD_ARC_FWD   = 8        # % avance en el arco duro
+HARD_ARC_DIFF  = 14       # % diferencial para “morder” el giro duro
 
 # Señal de giro por si queda invertido (+1 o -1)
 TURN_SIGN    = +1  # si gira al revés, pon -1
@@ -314,7 +314,7 @@ try:
             pos = side * 1.0; err = -pos; derr = 0.0; steer = diff  # solo para log
 
             # criterios de salida: mínimo tiempo + ya no corner o centro toca línea o timeout
-            center_on_line = (C <= 0.45)       # ajusta si tu línea es gris
+            center_on_line = (C <= 0.50)       # ajusta si tu línea es gris
             not_corner_now = (not is_corner_raw) and (not hard_left) and (not hard_right)
              # --- ESTA ES LA LÍNEA CLAVE QUE PREGUNTAS ---
             if (corner_hold >= CORNER_MIN_HOLD and not_corner_now) or center_on_line or (corner_hold >= CORNER_MAX_HOLD):
