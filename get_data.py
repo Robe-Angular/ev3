@@ -34,7 +34,7 @@ MOTOR_GAIN   = 1.00
 MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Señal de giro por si queda invertido (+1 o -1)
-TURN_SIGN    = +1  # si gira al revés, pon -1
+TURN_SIGN    = -1  # si gira al revés, pon -1
 
 # Línea perdida / esquina usando NORMALIZADOS
 # (0 ~ negro línea, 1 ~ blanco fondo tras calibración)
