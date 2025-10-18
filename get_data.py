@@ -41,7 +41,7 @@ MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
 # Esquina aguda (dos sensores negros)
 HARD_DEEP      = 0.28     # 0..1 (negro). Sube a 0.32 si tu negro es muy oscuro
 HARD_CLEAR     = 0.65     # 0..1 (blanco). Baja a 0.60 si el fondo es gris
-HARD_MIN_HOLD  = 0.30     # s de compromiso mínimo (más que corner normal)
+HARD_MIN_HOLD  = 0.35     # s de compromiso mínimo (más que corner normal)
 HARD_ARC_FWD   = 8        # % avance en el arco duro
 HARD_ARC_DIFF  = 14       # % diferencial para “morder” el giro duro
 
@@ -57,12 +57,12 @@ SEARCH_SPEED   = 8
 # --- Esquinas robustas ---
 CORNER_DEEP      = 0.20   # lado muy negro (0..1 normalizado)
 CORNER_CLEAR     = 0.80   # los otros muy blancos
-CORNER_DEBOUNCE  = 0.14   # s que debe durar la condición para aceptar esquina
-CORNER_MIN_HOLD  = 0.18   # s que nos quedamos en modo esquina como mínimo
+CORNER_DEBOUNCE  = 0.10   # s que debe durar la condición para aceptar esquina
+CORNER_MIN_HOLD  = 0.22   # s que nos quedamos en modo esquina como mínimo
 CORNER_MAX_HOLD  = 0.60   # s de seguridad para no quedarnos atrapados
 CORNER_PIVOT     = 9      # % base para pivot
-CORNER_ARC_FWD   = 7      # % componente hacia adelante para escapar
-CORNER_ARC_DIFF  = 12     # % diferencial para “morder” la esquina
+CORNER_ARC_FWD   = 6      # % componente hacia adelante para escapar
+CORNER_ARC_DIFF  = 14     # % diferencial para “morder” la esquina
 
 # Derivativo suavizado (filtro exponencial)
 D_ALPHA        = 0.35
@@ -99,6 +99,19 @@ def calibrate():
     if wL <= bL: wL, bL = bL, wL
     if wC <= bC: wC, bC = bC, wC
     if wR <= bR: wR, bR = bR, wR
+
+    d_wL = (wL - wL_prev) / DT
+    d_wR = (wR - wR_prev) / DT
+    # (opcional) suaviza un poco
+    DW_ALPHA = 0.4
+    try:
+        d_wL = (1.0 - DW_ALPHA)*d_wL_f + DW_ALPHA*d_wL
+        d_wR = (1.0 - DW_ALPHA)*d_wR_f + DW_ALPHA*d_wR
+    except NameError:
+        pass
+    d_wL_f, d_wR_f = d_wL, d_wR
+
+    wL_prev, wR_prev = wL, wR
 
     # Separación mínima de 5 puntos (evita hi==lo)
     MIN_DELTA = 5.0
@@ -197,6 +210,8 @@ time.sleep(0.5)
 lm.stop(); rm.stop()
 
 corner_is_hard = False
+wL_prev = wC_prev = wR_prev = 0.0
+d_wL = d_wC = d_wR = 0.0
 
 try:
     while running:
@@ -255,24 +270,36 @@ try:
             # por defecto (por si no hay rama), inicializa salidas “neutras”
             pos = 0.0; err = 0.0; derr = 0.0; steer = 0.0; base = BASE_MIN
             cmdL_target = 0.0; cmdR_target = 0.0
-            # PRIORIDAD: hard-turn
-            if hard_left or hard_right:
-                corner_side = -1 if hard_left else +1
+            C_HOOK = 0.15   # sube a 0.18 si tu línea es más gris
+            if (C <= C_HOOK) and (L >= CLEAR_TH) and (R >= CLEAR_TH):
+                # decide el lado por tendencia reciente (qué lado se oscureció más)
+                side_by_trend = +1 if (d_wR > d_wL) else -1
+                corner_side = side_by_trend if (d_wL != 0.0 or d_wR != 0.0) else (last_seen_dir if last_seen_dir != 0 else +1)
+
                 last_seen_dir = corner_side
                 state = STATE_CORNER
                 corner_hold = 0.0
-                # etiqueta este corner como "duro" guardando params en locals
-                corner_is_hard = True
-            elif is_corner:
-                corner_side = +1 if (wR > wL) else -1
-                last_seen_dir = corner_side          # <--- añade esto
-                state = STATE_CORNER
-                corner_hold = 0.0
-            elif line_lost:
-                state = STATE_SEARCH
+                corner_is_hard = False   # es una esquina, pero no "hard" de 2 sensores
             else:
-                # ---------- PD normal ----------
-                pos_raw = (-1.0*wL + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
+                # PRIORIDAD: hard-turn
+                if hard_left or hard_right:
+                    corner_side = -1 if hard_left else +1
+                    last_seen_dir = corner_side
+                    state = STATE_CORNER
+                    corner_hold = 0.0
+                    # etiqueta este corner como "duro" guardando params en locals
+                    corner_is_hard = True
+                elif is_corner:
+                    corner_side = +1 if (wR > wL) else -1
+                    last_seen_dir = corner_side          # <--- añade esto
+                    state = STATE_CORNER
+                    corner_hold = 0.0
+                elif line_lost:
+                    state = STATE_SEARCH
+                else:
+            
+                    # ---------- PD normal ----------
+                    pos_raw = (-1.0*wL + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
 
                 
                 try:
@@ -305,11 +332,13 @@ try:
                 # recordar lado más oscuro por si toca SEARCH
                 if (wL > wR and wL > wC): last_seen_dir = -1
                 elif (wR > wL and wR > wC): last_seen_dir = +1
-
+                pass
         elif state == STATE_CORNER:
             corner_hold += DT
             # arco de escape: un poco adelante + diferencial fuerte hacia el lado
             side = corner_side  # -1 izq, +1 der
+            if C <= 0.15:
+                base = max(5, base - 2)  # quita un pelín de avance para morder mejor
 
 
             if corner_is_hard:
@@ -338,7 +367,7 @@ try:
                 last_seen_dir = side
                 corner_is_hard = False
 
-        elif state == STATE_SEARCH:
+        elif state == STATE_SEARCH: 
             side = last_seen_dir if last_seen_dir != 0 else +1
             turn = SEARCH_SPEED
             base = SEARCH_SPEED
