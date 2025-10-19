@@ -20,23 +20,26 @@ touch = TouchSensor(INPUT_4)
 snd = Sound(); leds = Leds()
 
 # Línea perdida robusta
-CLEAR_TH     = 0.72   # "muy blanco" (0..1 normalizado)
+CLEAR_TH     = 0.68   # "muy blanco" (0..1 normalizado)
 DARK_TH      = 0.28   # "negro" (0..1 normalizado)
-LINE_LOST_DEB = 0.12  # s que la condición debe mantenerse para declarar perdida
-REACQ_W      = 0.18   # peso mínimo (1-n) de cualquier sensor para decir "re-adquirí"
+LINE_LOST_DEB = 0.10  # s que la condición debe mantenerse para declarar perdida
+REACQ_W      = 0.16   # peso mínimo (1-n) de cualquier sensor para decir "re-adquirí"
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
-BASE_MAX = 16      # % en rectas
-BASE_MIN = 10       # % en curvas duras
-K_SPEED  = 22      # caída por |err| (suave = 18..28)
+BASE_MAX = 28      # % en rectas
+BASE_MIN = 18       # % en curvas duras
+K_SPEED  = 24      # caída por |err| (suave = 18..28)
+
+# Dead-zone (nuevo)
+DEADZONE_MIN = 14.0  # % mínimo efectivo de motor
 
 # Control PD (realmente PD; integral NO para evitar windup)
-KP = 32.0          # 40..120
-KD = 14.0          # 6..16
-TURN_CLAMP   = 30  # tope giro
-SPEED_CLAMP  = 55  # tope motor
+KP = 38.0          # 40..120
+KD = 10.0          # 6..16
+TURN_CLAMP   = 35  # tope giro
+SPEED_CLAMP  = 70  # tope motor
 MOTOR_GAIN   = 1.00
-MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
+MAX_DELTA    = 8.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Esquina aguda (dos sensores negros)
 HARD_DEEP      = 0.28     # 0..1 (negro). Sube a 0.32 si tu negro es muy oscuro
@@ -51,23 +54,23 @@ TURN_SIGN    = +1  # si gira al revés, pon -1
 # Línea perdida / esquina usando NORMALIZADOS
 # (0 ~ negro línea, 1 ~ blanco fondo tras calibración)
 LINE_LOST_SUMW = 0.08      # si (wL+wC+wR)<esto ⇒ casi todo blanco
-PIVOT_SPEED    = 10
-SEARCH_SPEED   = 8
+PIVOT_SPEED    = 12
+SEARCH_SPEED   = 11
 
 # --- Esquinas robustas ---
-CORNER_DEEP      = 0.20   # lado muy negro (0..1 normalizado)
-CORNER_CLEAR     = 0.80   # los otros muy blancos
-CORNER_DEBOUNCE  = 0.10   # s que debe durar la condición para aceptar esquina
-CORNER_MIN_HOLD  = 0.22   # s que nos quedamos en modo esquina como mínimo
-CORNER_MAX_HOLD  = 0.60   # s de seguridad para no quedarnos atrapados
-CORNER_PIVOT     = 9      # % base para pivot
-CORNER_ARC_FWD   = 6      # % componente hacia adelante para escapar
-CORNER_ARC_DIFF  = 14     # % diferencial para “morder” la esquina
+CORNER_DEEP      = 0.18   # lado muy negro (0..1 normalizado)
+CORNER_CLEAR     = 0.78   # los otros muy blancos
+CORNER_DEBOUNCE  = 0.08   # s que debe durar la condición para aceptar esquina
+CORNER_MIN_HOLD  = 0.28   # s que nos quedamos en modo esquina como mínimo
+CORNER_MAX_HOLD  = 0.70   # s de seguridad para no quedarnos atrapados
+CORNER_PIVOT     = 11      # % base para pivot
+CORNER_ARC_FWD   = 10      # % componente hacia adelante para escapar
+CORNER_ARC_DIFF  = 20     # % diferencial para “morder” la esquina
 
 # Derivativo suavizado (filtro exponencial)
-D_ALPHA        = 0.35
-P_ALPHA = 0.30   # suaviza pos
-S_ALPHA = 0.40   # suaviza mando de giro
+D_ALPHA = 0.30
+P_ALPHA = 0.25   # suaviza pos
+S_ALPHA = 0.35   # suaviza mando de giro
 
 line_lost_deb_timer = 0.0
 # --------- Utils ----------
@@ -130,6 +133,10 @@ def calibrate():
     print("Calibracion OK. L: {0:.1f}/{1:.1f}  C: {2:.1f}/{3:.1f}  R: {4:.1f}/{5:.1f}".format(bL, wL, bC, wC, bR, wR))
     return (bL,wL), (bC,wC), (bR,wR)
 
+def apply_deadzone(cmd, dz=DEADZONE_MIN):
+    if cmd > 0 and cmd < dz:  return dz
+    if cmd < 0 and cmd > -dz: return -dz
+    return cmd
 
 def norm(v, lo, hi):
     d = float(hi-lo); 
@@ -192,6 +199,8 @@ running = True
 prev_cmdL = 0.0
 prev_cmdR = 0.0
 
+
+
 lm.on(SpeedPercent(15)); rm.on(SpeedPercent(15))
 time.sleep(0.5)
 lm.stop(); rm.stop()
@@ -199,6 +208,7 @@ lm.stop(); rm.stop()
 corner_is_hard = False
 wL_prev = wC_prev = wR_prev = 0.0
 d_wL = d_wC = d_wR = 0.0
+warmup = 0.0
 
 try:
     while running:
@@ -220,6 +230,8 @@ try:
         # DT real
         t_now = time.time()
         DT = max(0.01, t_now - t_prev)   # evita DT=0
+        warmup += DT
+        KD_eff = KD if warmup >= 0.30 else 0.0
         t_prev = t_now
 
         # Pesos de "oscuridad" (línea)
@@ -268,7 +280,7 @@ try:
             # por defecto (por si no hay rama), inicializa salidas “neutras”
             pos = 0.0; err = 0.0; derr = 0.0; steer = 0.0; base = BASE_MIN
             cmdL_target = 0.0; cmdR_target = 0.0
-            C_HOOK = 0.15   # sube a 0.18 si tu línea es más gris
+            C_HOOK = 0.18   # sube a 0.18 si tu línea es más gris
             if (C <= C_HOOK) and (L >= CLEAR_TH) and (R >= CLEAR_TH):
                 # decide el lado por tendencia reciente (qué lado se oscureció más)
                 side_by_trend = +1 if (d_wR > d_wL) else -1
@@ -393,6 +405,8 @@ try:
         cmdR = clamp(slew(prev_cmdR, cmdR_target, MAX_DELTA), -SPEED_CLAMP, SPEED_CLAMP)
         prev_cmdL, prev_cmdR = cmdL, cmdR
 
+        cmdL = apply_deadzone(cmdL)
+        cmdR = apply_deadzone(cmdR)
         lm.on(SpeedPercent(cmdL * MOTOR_GAIN))
         rm.on(SpeedPercent(cmdR * MOTOR_GAIN))
 
@@ -425,6 +439,6 @@ except KeyboardInterrupt:
 finally:
     lm.stop(); rm.stop()
     leds.all_off()
-    snd.speak('Acknowledged H.Q.')
+    snd.play_file("ackonwledged-hq.wav")
     f.close()
     print("CSV:", csv_path)

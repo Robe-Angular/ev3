@@ -1,0 +1,11 @@
+snd.speak('Comm-link online.')
+snd.speak('Systems functional.')
+snd.speak('Go ahead, TACCOM.')
+snd.speak('Acknowledged H.Q.')
+
+snd.speak('Place all sensors on WHITE, then press.')
+snd.speak('Place all sensors on BLACK line, then press.')
+snd.speak('Center the BLACK line under CENTER sensor, then press.')
+
+snd.speak('Center validation failed. Recalibrate.')
+snd.speak('Calibration OK.')
