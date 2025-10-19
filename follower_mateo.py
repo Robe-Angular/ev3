@@ -1,135 +1,166 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
-Seguidor de línea con curvas y pérdida de línea.
-Incluye calibración automática para adaptar los umbrales
-a la iluminación actual del entorno.
+Simple line follower with automatic calibration.
+Compatible with Python 3.5 (EV3).
+Uses 3 color sensors (L,C,R) and two motors (B,C).
+Records data to CSV in /home/robot/logs/.
 """
-from ev3dev2.auto import *
-from time import perf_counter, sleep
 
-# --- Conexiones ---
-motor_der = LargeMotor(OUTPUT_A)
-motor_izq = LargeMotor(OUTPUT_D)
-ojo_der = ColorSensor('in1')
-ojo_med = ColorSensor('in2')
-ojo_izq = ColorSensor('in3')
+from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C
+from ev3dev2.sensor.lego import ColorSensor
+from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3
+from ev3dev2.sound import Sound
+from ev3dev2.led import Leds
+from ev3dev2.button import Button
+import csv, os, time
 
-ojo_izq.mode = 'COL-REFLECT'
-ojo_der.mode = 'COL-REFLECT'
-ojo_med.mode = 'COL-REFLECT'
+# --- Hardware ---
+lm = LargeMotor(OUTPUT_B)
+rm = LargeMotor(OUTPUT_C)
+csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
+csC = ColorSensor(INPUT_2); csC.mode = 'COL-REFLECT'
+csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
+snd = Sound(); leds = Leds(); btn = Button()
 
-# --- Variables Globales ---
-apagado = False
-tiempo_inicio = perf_counter()
-tiempo_ejecucion = 0
-f = open("data.txt", "w+")
+# --- CSV setup ---
+ts = time.strftime("%Y%m%d_%H%M%S")
+log_dir = "/home/robot/logs"
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+csv_path = os.path.join(log_dir, "follower_log_" + ts + ".csv")
+f = open(csv_path, "w", newline="")
+writer = csv.writer(f)
+writer.writerow(["t","L","C","R","cmdL","cmdR","state"])
+t0 = time.time()
 
-# --- Calibración Automática ---
-def calibrar():
-    """Calibra blanco y negro en los tres sensores."""
-    snd = Sound()
-    snd.speak('Place sensors on white, then press center button.')
-    btn = Button()
-    while not btn.enter: sleep(0.1)
-    blanco = [ojo_izq.value(), ojo_med.value(), ojo_der.value()]
-    print("Lecturas en blanco:", blanco)
-    snd.speak('Now place sensors on black line.')
-    while btn.enter: sleep(0.1)
-    while not btn.enter: sleep(0.1)
-    negro = [ojo_izq.value(), ojo_med.value(), ojo_der.value()]
-    print("Lecturas en negro:", negro)
-    snd.speak('Calibration complete.')
+# --- Calibration ---
+def wait_press():
+    while not btn.enter:
+        time.sleep(0.05)
+    while btn.enter:
+        time.sleep(0.05)
 
-    # Calcula umbrales promedio
-    prom_b = sum(blanco) / 3
-    prom_n = sum(negro) / 3
-    rango = prom_b - prom_n
+def avg(sensor, n=10):
+    total = 0
+    for _ in range(n):
+        total += sensor.reflected_light_intensity
+    return total / float(n)
 
-    VER_NEGRO = prom_n + 0.20 * rango
-    VER_GRIS  = prom_n + 0.45 * rango
-    VER_BLANCO = prom_n + 0.70 * rango
+def calibrate():
+    leds.set_color('LEFT','YELLOW'); leds.set_color('RIGHT','YELLOW')
+    snd.speak("Place sensors on white and press the center button.")
+    wait_press()
+    white = [avg(csL), avg(csC), avg(csR)]
+    print("White:", white)
 
-    print("Umbrales -> NEGRO:", VER_NEGRO, "GRIS:", VER_GRIS, "BLANCO:", VER_BLANCO)
-    return VER_NEGRO, VER_GRIS, VER_BLANCO
+    snd.speak("Now place sensors on black line and press again.")
+    wait_press()
+    black = [avg(csL), avg(csC), avg(csR)]
+    print("Black:", black)
 
-VER_NEGRO, VER_GRIS, VER_BLANCO = calibrar()
+    leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
+    snd.speak("Calibration complete.")
+    b_avg = sum(black)/3.0
+    w_avg = sum(white)/3.0
+    delta = w_avg - b_avg
+    VER_BLACK = b_avg + 0.20*delta
+    VER_GRAY  = b_avg + 0.45*delta
+    VER_WHITE = b_avg + 0.70*delta
+    print("Thresholds -> BLACK={:.1f} GRAY={:.1f} WHITE={:.1f}".format(
+        VER_BLACK, VER_GRAY, VER_WHITE))
+    return VER_BLACK, VER_GRAY, VER_WHITE
 
-# --- Velocidades ---
-VEL_ALTA = 80
-VEL_MEDIA = 50
-VEL_BAJA = 10
-VEL_INVERSA = -50
+VER_BLACK, VER_GRAY, VER_WHITE = calibrate()
 
-# --- Funciones ---
-def anota():
-    datos = (ojo_izq.value(), ojo_med.value(), ojo_der.value(), motor_izq.speed, motor_der.speed)
-    print(datos)
-    f.write(str(datos) + "\n")
+# --- Motor speeds ---
+VEL_HIGH = 80
+VEL_MED  = 50
+VEL_LOW  = 10
+VEL_REV  = -50
 
-def apagador():
-    print("Apagando motores...")
-    motor_izq.stop()
-    motor_der.stop()
+snd.speak("Ready. Press button to start.")
+wait_press()
+snd.speak("Line following started.")
+leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
 
-def run():
-    global apagado, tiempo_ejecucion
+# --- Main loop ---
+running = True
+try:
+    while running:
+        L = csL.value()
+        C = csC.value()
+        R = csR.value()
 
-    while not apagado and tiempo_ejecucion < 60:
-        tiempo_ejecucion = perf_counter() - tiempo_inicio
+        state = "FORWARD"
 
-        val_izq = ojo_izq.value()
-        val_med = ojo_med.value()
-        val_der = ojo_der.value()
+        # 1️⃣ Right 90°
+        if L < VER_BLACK and C < VER_BLACK:
+            state = "TURN_RIGHT_90"
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_REV)
 
-        # 1️⃣ Curva 90° derecha
-        if val_izq < VER_NEGRO and val_med < VER_NEGRO:
-            print("Giro 90° derecha")
-            motor_izq.run_forever(speed_sp=VEL_ALTA)
-            motor_der.run_forever(speed_sp=VEL_INVERSA)
+        # 2️⃣ Left 90°
+        elif R < VER_BLACK and C < VER_BLACK:
+            state = "TURN_LEFT_90"
+            lm.run_forever(speed_sp=VEL_REV)
+            rm.run_forever(speed_sp=VEL_HIGH)
 
-        # 2️⃣ Curva 90° izquierda
-        elif val_der < VER_NEGRO and val_med < VER_NEGRO:
-            print("Giro 90° izquierda")
-            motor_izq.run_forever(speed_sp=VEL_INVERSA)
-            motor_der.run_forever(speed_sp=VEL_ALTA)
+        # 3️⃣ Hard correction right
+        elif L < VER_BLACK:
+            state = "HARD_RIGHT"
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_LOW)
 
-        # 3️⃣ Correcciones normales
-        elif val_izq < VER_NEGRO:
-            print("Gira duro derecha")
-            motor_izq.run_forever(speed_sp=VEL_ALTA)
-            motor_der.run_forever(speed_sp=VEL_BAJA)
+        # 4️⃣ Hard correction left
+        elif R < VER_BLACK:
+            state = "HARD_LEFT"
+            lm.run_forever(speed_sp=VEL_LOW)
+            rm.run_forever(speed_sp=VEL_HIGH)
 
-        elif val_der < VER_NEGRO:
-            print("Gira duro izquierda")
-            motor_izq.run_forever(speed_sp=VEL_BAJA)
-            motor_der.run_forever(speed_sp=VEL_ALTA)
+        # 5️⃣ Soft correction right
+        elif L < VER_GRAY:
+            state = "SOFT_RIGHT"
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_MED)
 
-        elif val_izq < VER_GRIS:
-            print("Gira derecha")
-            motor_izq.run_forever(speed_sp=VEL_ALTA)
-            motor_der.run_forever(speed_sp=VEL_MEDIA)
+        # 6️⃣ Soft correction left
+        elif R < VER_GRAY:
+            state = "SOFT_LEFT"
+            lm.run_forever(speed_sp=VEL_MED)
+            rm.run_forever(speed_sp=VEL_HIGH)
 
-        elif val_der < VER_GRIS:
-            print("Gira izquierda")
-            motor_izq.run_forever(speed_sp=VEL_MEDIA)
-            motor_der.run_forever(speed_sp=VEL_ALTA)
-
-        # 4️⃣ Línea perdida
-        elif val_izq > VER_BLANCO and val_med > VER_BLANCO and val_der > VER_BLANCO:
-            print("¡Línea perdida! Deteniendo robot.")
-            apagado = True
+        # 7️⃣ Lost line
+        elif L > VER_WHITE and C > VER_WHITE and R > VER_WHITE:
+            state = "LINE_LOST"
+            lm.stop(); rm.stop()
+            snd.speak("Line lost, stopping.")
+            leds.set_color('LEFT','RED'); leds.set_color('RIGHT','RED')
+            running = False
             break
 
-        # 5️⃣ Avance recto
+        # 8️⃣ Default forward
         else:
-            print("OK recto")
-            motor_izq.run_forever(speed_sp=VEL_ALTA)
-            motor_der.run_forever(speed_sp=VEL_ALTA)
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_HIGH)
 
-        anota()
-        sleep(0.1)
+        # Log to CSV
+        writer.writerow([
+            round(time.time() - t0, 3),
+            L, C, R,
+            lm.speed, rm.speed,
+            state
+        ])
+        f.flush()
 
-# --- Ejecución principal ---
-run()
-apagador()
-f.close()
+        time.sleep(0.1)
+
+except KeyboardInterrupt:
+    pass
+finally:
+    lm.stop(); rm.stop()
+    f.close()
+    leds.all_off()
+    snd.speak("Mission complete.")
+    print("CSV saved at:", csv_path)
