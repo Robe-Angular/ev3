@@ -164,7 +164,7 @@ try:
             last_side = 'right'; state = "SOFT_RIGHT"
 
         elif L > VER_WHITE and C > VER_WHITE and R > VER_WHITE:
-            print("Line lost → searching", last_side)
+            print("Line lost searching", last_side)
             lm.stop(); rm.stop()
             if not search_line(last_side):
                 running = False
