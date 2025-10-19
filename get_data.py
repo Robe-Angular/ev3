@@ -19,10 +19,13 @@ csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
 snd = Sound(); leds = Leds()
 
-BLIND_SUMW        = 0.20   # si wL+wR < esto, casi no hay línea en los lados
-BLIND_C_TH        = 0.65   # C claro (ajústalo si tu fondo es gris)
-BLIND_MIN_STEER   = 16.0   # diferencia mínima entre ruedas cuando estás “ciego”
-STEER_ZERO_TH     = 0.5    # umbral para anular steer (antes 1.5)
+# --- Blind steer más suave/proporcional ---
+BLIND_SUMW        = 0.14   # antes 0.20 (activa blind solo si los lados están MUY blancos)
+BLIND_C_TH        = 0.68   # sube el requisito de C claro
+BLIND_STEER_MIN   = 8.0    # antes 16.0 → giro mínimo más chico
+BLIND_STEER_MAX   = 14.0   # tope de giro en blind (antes no teníamos)
+BLIND_BASE_DROP   = 4      # baja la base en blind para no “salirte patinando”
+STEER_ZERO_TH     = 0.3    # antes 0.5 (deja pasar giros chicos útiles)
 
 # SEARCH sin reversa
 SEARCH_FWD_MIN  = 10   # si patina, 12
@@ -33,9 +36,9 @@ CENTER_ON_LINE_TH = 0.55  # baja de 0.60 → no salga de SEARCH por gris tenue
 
 # Línea perdida robusta
 # Más tolerante para re-adquirir y más difícil caer a SEARCH
-CLEAR_TH       = 0.60      # antes 0.68
+CLEAR_TH       = 0.56      # antes 0.68
 LINE_LOST_DEB  = 0.22      # antes 0.10
-REACQ_W        = 0.12      # antes 0.16
+REACQ_W        = 0.14      # antes 0.16
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
 BASE_MAX = 26      # % en rectas
@@ -51,7 +54,7 @@ KD = 8.0          # 6..16
 TURN_CLAMP   = 30  # tope giro
 SPEED_CLAMP  = 70  # tope motor
 MOTOR_GAIN   = 1.00
-MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
+MAX_DELTA    = 4.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Esquina aguda (dos sensores negros)
 HARD_DEEP     = 0.30    # antes 0.26
@@ -377,17 +380,24 @@ try:
             if abs(steer) < 1.5:
                 steer = 0.0
 
-            # --- Anti-recta en blanco ("blind steer") ---
+            # --- Blind steer proporcional SUAVE ---
+            # Casi no hay línea en los lados y el centro está claro → guía suave hacia last_seen_dir
             if (wL + wR) < BLIND_SUMW and C >= BLIND_C_TH:
                 side = last_seen_dir if last_seen_dir != 0 else +1
-                # obliga un giro mínimo claro (cmdR - cmdL = steer)
-                steer = side * BLIND_MIN_STEER
-                # baja un poco la base para que el giro mande
-                base  = max(BASE_MIN, base - 2)
+                # cuánto más oscuro está un lado que el otro (0..1 aprox)
+                g = abs(wR - wL)
+                # escalar 8..14 aprox según g (muy pequeño si la diferencia es mínima)
+                steer_mag = BLIND_STEER_MIN + 20.0 * g
+                if steer_mag > BLIND_STEER_MAX:
+                    steer_mag = BLIND_STEER_MAX
 
+                steer = side * steer_mag
+                base  = clamp(base - BLIND_BASE_DROP, BASE_MIN, BASE_MAX)
+
+            # anulación de giros mínimos (más permisiva)
             if abs(steer) < STEER_ZERO_TH:
                 steer = 0.0
-                
+
             cmdL_target = base - steer/2.0
             cmdR_target = base + steer/2.0
 
