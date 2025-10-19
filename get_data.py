@@ -75,6 +75,46 @@ def parse_cli_and_apply_defaults():
     p.add_argument("--STEER_SAT_TH", type=float)
     p.add_argument("--STEER_SAT_TIME", type=float)
 
+    # velocidad/base y rampa
+    p.add_argument("--BASE_MIN", type=float)
+    p.add_argument("--BASE_MAX", type=float)
+    p.add_argument("--K_SPEED", type=float)
+    p.add_argument("--MAX_DELTA", type=float)
+    p.add_argument("--SPEED_CLAMP", type=float)
+    p.add_argument("--MOTOR_GAIN", type=float)
+
+    # filtros / zeros
+    p.add_argument("--P_ALPHA", type=float)
+    p.add_argument("--S_ALPHA", type=float)
+    p.add_argument("--STEER_ZERO_TH", type=float)
+
+    # blind y búsqueda extra por si pruebas
+    p.add_argument("--BLIND_BASE_DROP", type=float)
+    p.add_argument("--BLIND_SUMW", type=float)
+    p.add_argument("--BLIND_C_TH", type=float)
+    p.add_argument("--BLIND_STEER_MIN", type=float)
+    p.add_argument("--BLIND_STEER_MAX", type=float)
+
+    p.add_argument("--SEARCH_TIMEOUT", type=float)
+    p.add_argument("--SEARCH_KICK_T", type=float)
+    p.add_argument("--SEARCH_BIAS", type=float)
+
+    # esquina/corner
+    p.add_argument("--CORNER_MIN_HOLD", type=float)
+    p.add_argument("--CORNER_MAX_HOLD", type=float)
+    p.add_argument("--CORNER_COOLDOWN", type=float)
+    p.add_argument("--C_HOOK", type=float)
+    p.add_argument("--CORNER_DEEP", type=float)
+    p.add_argument("--CORNER_CLEAR", type=float)
+    p.add_argument("--CORNER_DEBOUNCE", type=float)
+
+    # thresholds “line lost”
+    p.add_argument("--CLEAR_TH", type=float)
+    p.add_argument("--CLEAR_TH_HI", type=float)
+    p.add_argument("--CLEAR_TH_LO", type=float)
+    p.add_argument("--CENTER_ON_LINE_TH", type=float)
+
+
     args, _ = p.parse_known_args()
     chosen = dict(PROFILES["safe"])  # base
     chosen.update(PROFILES.get(args.profile, {}))
