@@ -176,7 +176,7 @@ HARD_ARC_FWD   = 14        # % avance en el arco duro
 HARD_ARC_DIFF  = 20       # % diferencial para “morder” el giro duro
 
 # # Señal de giro por si queda invertido (+1 o -1)
-TURN_SIGN    = +1  # si gira al revés, pon -1
+TURN_SIGN    = -1  # si gira al revés, pon -1
 
 # Línea perdida / esquina usando NORMALIZADOS
 # (0 ~ negro línea, 1 ~ blanco fondo tras calibración)
