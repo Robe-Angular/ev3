@@ -283,7 +283,19 @@ try:
 
         # ----- detecciones básicas -----
         # Línea perdida robusta: los 3 ven muy blanco
+        # Línea perdida robusta: los 3 ven muy blanco
         line_lost_raw = (L >= CLEAR_TH and C >= CLEAR_TH and R >= CLEAR_TH)
+
+        # --- LATCH DE TENDENCIA ANTES DE ENTRAR A SEARCH ---
+        # Mezcla nivel (wR-wL) y tendencia (d_wR-d_wL):
+        #  - si R venía más oscuro/oscureciéndose → +1 (buscar a la derecha)
+        #  - si L venía más oscuro/oscureciéndose → -1 (buscar a la izquierda)
+        if line_lost_raw and state == STATE_NORMAL:
+            trend_score = 0.6 * (wR - wL) + 0.4 * (d_wR - d_wL)
+            # márgenes pequeños para no fl apar por ruido
+            if abs(wR - wL) > 0.04 or abs(d_wR - d_wL) > 0.04:
+                last_seen_dir = +1 if trend_score > 0 else -1
+        # -----------------------------------------------
 
         # debounce para evitar parpadeos
         if line_lost_raw:
