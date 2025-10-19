@@ -28,17 +28,22 @@ BLIND_BASE_DROP   = 4      # baja la base en blind para no “salirte patinando�
 STEER_ZERO_TH     = 0.3    # antes 0.5 (deja pasar giros chicos útiles)
 
 # SEARCH sin reversa
-SEARCH_FWD_MIN  = 10   # si patina, 12
-SEARCH_TURN     = 5    # era 6
-SEARCH_BUMP_FWD = 14
-SEARCH_TIMEOUT  = 0.60
-CENTER_ON_LINE_TH = 0.55  # baja de 0.60 → no salga de SEARCH por gris tenue
+SEARCH_FWD_MIN   = 9     # antes 10-12 → menos proyección recta
+SEARCH_TURN      = 7     # era 5 → más giro
+SEARCH_BUMP_FWD  = 13    # era 14
+SEARCH_TIMEOUT   = 0.55  # era 0.60
+SEARCH_KICK_T    = 0.25  # NUEVO: primeros 0.25s, giro fuerte
+SEARCH_KICK_TURN = 11    # NUEVO: giro fuerte al inicio
+SEARCH_BIAS      = 2.0   # NUEVO: asimetría extra de avance al lado elegido
 
 # Línea perdida robusta
 # Más tolerante para re-adquirir y más difícil caer a SEARCH
 CLEAR_TH       = 0.56      # antes 0.68
-LINE_LOST_DEB  = 0.22      # antes 0.10
-REACQ_W        = 0.14      # antes 0.16
+CLEAR_TH_HI    = 0.58   # antes 0.60 (o 0.62 si aún cae de más)
+CLEAR_TH_LO    = 0.52   # zona de salida de "todo blanco"
+LINE_LOST_DEB  = 0.28   # antes 0.22 → más filtro
+REACQ_W        = 0.18   # antes 0.12 → re-adquiere antes
+CENTER_ON_LINE_TH = 0.45  # antes 0.55 → exige negro más claro en el centro
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
 BASE_MAX = 26      # % en rectas
@@ -284,26 +289,25 @@ try:
         # ----- detecciones básicas -----
         # Línea perdida robusta: los 3 ven muy blanco
         # Línea perdida robusta: los 3 ven muy blanco
-        line_lost_raw = (L >= CLEAR_TH and C >= CLEAR_TH and R >= CLEAR_TH)
+        # --- Línea perdida con histéresis + latch de tendencia ---
+        all_hi = (L >= CLEAR_TH_HI and C >= CLEAR_TH_HI and R >= CLEAR_TH_HI)
+        any_lo = (L <= CLEAR_TH_LO or  C <= CLEAR_TH_LO or  R <= CLEAR_TH_LO)
 
-        # --- LATCH DE TENDENCIA ANTES DE ENTRAR A SEARCH ---
-        # Mezcla nivel (wR-wL) y tendencia (d_wR-d_wL):
-        #  - si R venía más oscuro/oscureciéndose → +1 (buscar a la derecha)
-        #  - si L venía más oscuro/oscureciéndose → -1 (buscar a la izquierda)
-        if line_lost_raw and state == STATE_NORMAL:
-            trend_score = 0.6 * (wR - wL) + 0.4 * (d_wR - d_wL)
-            # márgenes pequeños para no fl apar por ruido
-            if abs(wR - wL) > 0.04 or abs(d_wR - d_wL) > 0.04:
-                last_seen_dir = +1 if trend_score > 0 else -1
-        # -----------------------------------------------
-
-        # debounce para evitar parpadeos
-        if line_lost_raw:
+        if all_hi:
+            # estamos claramente en "todo blanco"
             line_lost_deb_timer += DT
-        else:
+        elif any_lo:
+            # salimos del estado "todo blanco"
             line_lost_deb_timer = 0.0
 
         line_lost = (line_lost_deb_timer >= LINE_LOST_DEB)
+
+        # Latch de tendencia para decidir lado ANTES de caer a SEARCH
+        if line_lost and state == STATE_NORMAL:
+            trend_score = 0.6 * (wR - wL) + 0.4 * (d_wR - d_wL)
+            if abs(wR - wL) > 0.06 or abs(d_wR - d_wL) > 0.06:
+                last_seen_dir = +1 if trend_score > 0 else -1
+
 
         # “esquina cruda”: exactamente 1 muy negro y alguno muy blanco
         darkL = (L <= CORNER_DEEP); darkC = (C <= CORNER_DEEP); darkR = (R <= CORNER_DEEP)
@@ -459,35 +463,44 @@ try:
             side = last_seen_dir if last_seen_dir != 0 else +1
             base = 0  # no usamos 'base' aquí
 
-            # Giro suave + avance (sin reversa)
-            fwd  = SEARCH_FWD_MIN
-            turn = SEARCH_TURN
-
-            # Si lleva mucho sin re-adquirir, cambia estrategia: más avance y cambia el lado
-            if search_timer >= SEARCH_TIMEOUT:
-                side = -side              # invierte espiral
-                last_seen_dir = side
-                fwd  = SEARCH_BUMP_FWD    # empujón hacia delante
-                turn = SEARCH_TURN - 2    # un poco menos de giro para proyectar
-                search_timer = 0.0        # reinicia timer
-
-            # Comandos crudos
-            cmdL_target = fwd - side * turn
-            cmdR_target = fwd + side * turn
-
-            # --- FORZAR AVANCE: nunca reversa en SEARCH ---
-            if cmdL_target < SEARCH_FWD_MIN: cmdL_target = SEARCH_FWD_MIN
-            if cmdR_target < SEARCH_FWD_MIN: cmdR_target = SEARCH_FWD_MIN
+            # Tiempo acumulado en SEARCH ya lo tienes como 'search_timer'
+            # Fase "KICK": primeros SEARCH_KICK_T s con giro muy marcado
+            if search_timer <= SEARCH_KICK_T:
+                fwd  = SEARCH_FWD_MIN
+                turn = SEARCH_KICK_TURN
+                # asimetría de avance para evitar reversas sin romper la regla "sin reversa"
+                # empuja más la rueda que morde el giro
+                if side > 0:
+                    cmdL_target = max(fwd - (turn + SEARCH_BIAS), SEARCH_FWD_MIN)
+                    cmdR_target = fwd + (turn + SEARCH_BIAS)
+                else:
+                    cmdL_target = fwd + (turn + SEARCH_BIAS)
+                    cmdR_target = max(fwd - (turn + SEARCH_BIAS), SEARCH_FWD_MIN)
+            else:
+                # Fase normal de búsqueda (arco suave)
+                fwd  = SEARCH_FWD_MIN
+                turn = SEARCH_TURN
+                cmdL_target = fwd - side * turn
+                cmdR_target = fwd + side * turn
+                # nunca reversa en SEARCH
+                if cmdL_target < SEARCH_FWD_MIN: cmdL_target = SEARCH_FWD_MIN
+                if cmdR_target < SEARCH_FWD_MIN: cmdR_target = SEARCH_FWD_MIN
 
             pos = 0.0; err = 0.0; derr = 0.0; steer = side*turn  # log
 
-            # Salida de SEARCH si vemos “algo” o esquina
+            # Salida de SEARCH si vemos “algo” o centro toca línea negra
             reacq = (wL >= REACQ_W) or (wC >= REACQ_W) or (wR >= REACQ_W) or (C <= CENTER_ON_LINE_TH)
             if reacq or is_corner:
                 state = STATE_NORMAL
                 corner_deb = 0.0
                 line_lost_deb_timer = 0.0
                 search_timer = 0.0
+
+            # Cambio de lado y empujón si tardamos demasiado
+            if state == STATE_SEARCH and search_timer >= SEARCH_TIMEOUT:
+                last_seen_dir = -side
+                search_timer = 0.0  # reinicia para forzar otra fase KICK
+
 
 
         # Salida común
