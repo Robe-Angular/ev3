@@ -2,18 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-Simple line follower with automatic calibration.
-Compatible with Python 3.5 (EV3).
-Uses 3 color sensors (L,C,R) and two motors (B,C).
-Records data to CSV in /home/robot/logs/.
+Line follower with calibration using TouchSensor (INPUT_4).
+Compatible with Python 3.5.
 """
 
 from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C
-from ev3dev2.sensor.lego import ColorSensor
-from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3
+from ev3dev2.sensor.lego import ColorSensor, TouchSensor
+from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
 from ev3dev2.sound import Sound
 from ev3dev2.led import Leds
-from ev3dev2.button import Button
 import csv, os, time
 
 # --- Hardware ---
@@ -22,24 +19,26 @@ rm = LargeMotor(OUTPUT_C)
 csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
 csC = ColorSensor(INPUT_2); csC.mode = 'COL-REFLECT'
 csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
-snd = Sound(); leds = Leds(); btn = Button()
+touch = TouchSensor(INPUT_4)
+snd = Sound(); leds = Leds()
 
 # --- CSV setup ---
 ts = time.strftime("%Y%m%d_%H%M%S")
 log_dir = "/home/robot/logs"
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
-csv_path = os.path.join(log_dir, "follower_log_" + ts + ".csv")
+csv_path = os.path.join(log_dir, "follower_touch_" + ts + ".csv")
 f = open(csv_path, "w", newline="")
 writer = csv.writer(f)
 writer.writerow(["t","L","C","R","cmdL","cmdR","state"])
 t0 = time.time()
 
-# --- Calibration ---
-def wait_press():
-    while not btn.enter:
+# --- Calibration helpers ---
+def wait_touch():
+    """Espera a que se presione y se suelte el botón touch."""
+    while not touch.is_pressed:
         time.sleep(0.05)
-    while btn.enter:
+    while touch.is_pressed:
         time.sleep(0.05)
 
 def avg(sensor, n=10):
@@ -50,13 +49,13 @@ def avg(sensor, n=10):
 
 def calibrate():
     leds.set_color('LEFT','YELLOW'); leds.set_color('RIGHT','YELLOW')
-    snd.speak("Place sensors on white and press the center button.")
-    wait_press()
+    snd.speak("Place sensors on white, press touch.")
+    wait_touch()
     white = [avg(csL), avg(csC), avg(csR)]
     print("White:", white)
 
-    snd.speak("Now place sensors on black line and press again.")
-    wait_press()
+    snd.speak("Now place sensors on black line, press touch.")
+    wait_touch()
     black = [avg(csL), avg(csC), avg(csR)]
     print("Black:", black)
 
@@ -80,8 +79,8 @@ VEL_MED  = 50
 VEL_LOW  = 10
 VEL_REV  = -50
 
-snd.speak("Ready. Press button to start.")
-wait_press()
+snd.speak("Ready. Press touch to start.")
+wait_touch()
 snd.speak("Line following started.")
 leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
 
@@ -95,43 +94,46 @@ try:
 
         state = "FORWARD"
 
-        # 1️⃣ Right 90°
-        if L < VER_BLACK and C < VER_BLACK:
-            state = "TURN_RIGHT_90"
-            lm.run_forever(speed_sp=VEL_HIGH)
-            rm.run_forever(speed_sp=VEL_REV)
+        # ⚙️ Invertí la lógica de los giros: ahora "derecha" realmente gira a la derecha física.
+        # Antes estaba al revés.
 
-        # 2️⃣ Left 90°
-        elif R < VER_BLACK and C < VER_BLACK:
+        # 1️⃣ 90° LEFT (ahora invertido)
+        if L < VER_BLACK and C < VER_BLACK:
             state = "TURN_LEFT_90"
             lm.run_forever(speed_sp=VEL_REV)
             rm.run_forever(speed_sp=VEL_HIGH)
 
-        # 3️⃣ Hard correction right
-        elif L < VER_BLACK:
-            state = "HARD_RIGHT"
+        # 2️⃣ 90° RIGHT (ahora invertido)
+        elif R < VER_BLACK and C < VER_BLACK:
+            state = "TURN_RIGHT_90"
             lm.run_forever(speed_sp=VEL_HIGH)
-            rm.run_forever(speed_sp=VEL_LOW)
+            rm.run_forever(speed_sp=VEL_REV)
 
-        # 4️⃣ Hard correction left
-        elif R < VER_BLACK:
+        # 3️⃣ Hard correction LEFT (invertido)
+        elif L < VER_BLACK:
             state = "HARD_LEFT"
             lm.run_forever(speed_sp=VEL_LOW)
             rm.run_forever(speed_sp=VEL_HIGH)
 
-        # 5️⃣ Soft correction right
-        elif L < VER_GRAY:
-            state = "SOFT_RIGHT"
+        # 4️⃣ Hard correction RIGHT (invertido)
+        elif R < VER_BLACK:
+            state = "HARD_RIGHT"
             lm.run_forever(speed_sp=VEL_HIGH)
-            rm.run_forever(speed_sp=VEL_MED)
+            rm.run_forever(speed_sp=VEL_LOW)
 
-        # 6️⃣ Soft correction left
-        elif R < VER_GRAY:
+        # 5️⃣ Soft correction LEFT (invertido)
+        elif L < VER_GRAY:
             state = "SOFT_LEFT"
             lm.run_forever(speed_sp=VEL_MED)
             rm.run_forever(speed_sp=VEL_HIGH)
 
-        # 7️⃣ Lost line
+        # 6️⃣ Soft correction RIGHT (invertido)
+        elif R < VER_GRAY:
+            state = "SOFT_RIGHT"
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_MED)
+
+        # 7️⃣ Line lost
         elif L > VER_WHITE and C > VER_WHITE and R > VER_WHITE:
             state = "LINE_LOST"
             lm.stop(); rm.stop()
@@ -145,15 +147,9 @@ try:
             lm.run_forever(speed_sp=VEL_HIGH)
             rm.run_forever(speed_sp=VEL_HIGH)
 
-        # Log to CSV
-        writer.writerow([
-            round(time.time() - t0, 3),
-            L, C, R,
-            lm.speed, rm.speed,
-            state
-        ])
+        # Log
+        writer.writerow([round(time.time() - t0, 3), L, C, R, lm.speed, rm.speed, state])
         f.flush()
-
         time.sleep(0.1)
 
 except KeyboardInterrupt:
