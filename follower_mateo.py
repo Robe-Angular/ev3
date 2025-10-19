@@ -52,7 +52,7 @@ def avg(sensor, n=10, d=0.01):
 def clamp(x, lo, hi):
     return lo if x < lo else (hi if x > hi else x)
 
-MAX_DELTA = 6.0   # puntos % por ciclo (4..8)
+MAX_DELTA = 12.0   # puntos % por ciclo (4..8)
 
 _prevL = 0.0
 _prevR = 0.0
@@ -109,27 +109,27 @@ calibL, calibC, calibR, CLEAR_HI, CLEAR_LO, CENTER_ON_LINE = calibrate()
 # P follower
 # ---------------- Params (smart/simple) ----------------
 TURN_SIGN  = +1   # si gira al revés, pon -1
-KP         = 48.0
-TURN_CLAMP = 38.0
-BASE_MAX   = 38.0
+KP         = 56.0
+TURN_CLAMP = 44.0
+BASE_MAX   = 36.0
 BASE_MIN   = 16.0
 K_SPEED    = 22.0
 
 # Blind steer (cuando centro claro y lados muy blancos)
-BLIND_SUMW  = 0.14
-BLIND_C_TH  = 0.65
-BLIND_STEER = 10.0
+BLIND_SUMW  = 0.16
+BLIND_C_TH  = 0.62
+BLIND_STEER = 12.0
 BLIND_DROP  = 5.0
 
 # Search (sin reversa)
 SEARCH_FWD  = 18.0
 SEARCH_TURN = 12.0
-SEARCH_SIDE_SWITCH = 0.9
+SEARCH_SIDE_SWITCH = 0.8
 
 
 # Debounce / cooldown
-LINE_LOST_DEB = 0.20   # s en “todo blanco” para declarar pérdida
-REACQ_COOLDOWN = 0.20  # s ignorando “todo blanco” tras re-adquirir
+LINE_LOST_DEB = 0.26   # s en “todo blanco” para declarar pérdida
+REACQ_COOLDOWN = 0.22  # s ignorando “todo blanco” tras re-adquirir
 
 # ---------------- State ----------------
 FOLLOW, SEARCH = 0, 1
@@ -204,6 +204,27 @@ try:
             # Proportional steer
             steer = clamp(TURN_SIGN * KP * pos, -TURN_CLAMP, TURN_CLAMP)
 
+            # --------- Anticipación con derivada ligera ---------
+            # pos ya la tienes: (-wL + wR) / sumw
+            # derivada filtrada
+            try:
+                dpos = (pos - pos_prev) / DT
+            except NameError:
+                dpos = 0.0
+            pos_prev = pos
+
+            KD = 8.0          # chico; no queremos ruido (6..10)
+            D_ALPHA = 0.35    # filtrito exponencial
+            try:
+                dpos_f = (1.0 - D_ALPHA)*dpos_f + D_ALPHA*dpos
+            except NameError:
+                dpos_f = dpos
+
+            # steer proporcional + un toque derivativo
+            steer_p = KP * pos
+            steer_d = -KD * dpos_f         # derivada sobre medición amortigua
+            steer   = clamp(TURN_SIGN * (steer_p + steer_d), -TURN_CLAMP, TURN_CLAMP)
+
             # Blind steer: center very clear and sides very clear
             if (wL + wR) < BLIND_SUMW and C >= BLIND_C_TH:
                 side = last_side if last_side != 0 else +1
@@ -270,10 +291,11 @@ try:
         ])
         f.flush()
 
-        # Fixed 50 Hz loop
+        # Fixed loop rate (~60 Hz)
         loop_dt = time.time() - t_now
-        if loop_dt < 0.02:
-            time.sleep(0.02 - loop_dt)
+        target = 0.016  # 16 ms
+        if loop_dt < target:
+            time.sleep(target - loop_dt)
 
 except KeyboardInterrupt:
     pass
