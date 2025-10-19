@@ -214,6 +214,7 @@ corner_is_hard = False
 wL_prev = wC_prev = wR_prev = 0.0
 d_wL = d_wC = d_wR = 0.0
 warmup = 0.0
+corner_cool = 0
 
 try:
     while running:
@@ -280,7 +281,6 @@ try:
             corner_deb = 0.0
 
         is_corner = (corner_deb >= CORNER_DEBOUNCE)
-        corner_cool = 0.0  # NUEVO: tiempo restante de enfriamiento post-esquina
 
         # ----- FSM -----
         if state == STATE_NORMAL:
@@ -362,7 +362,7 @@ try:
             # recordar lado más oscuro por si toca SEARCH
             if (wL > wR and wL > wC): last_seen_dir = -1
             elif (wR > wL and wR > wC): last_seen_dir = +1
-            
+
         elif state == STATE_CORNER:
             corner_hold += DT
             # arco de escape: un poco adelante + diferencial fuerte hacia el lado
