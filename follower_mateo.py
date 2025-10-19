@@ -2,161 +2,185 @@
 # -*- coding: utf-8 -*-
 """
 Line follower with automatic calibration and persistent search mode.
-Keeps searching indefinitely toward the last side seen when line is lost.
-Press the touch sensor to stop.
+Uses ports:
+  Motors:  B (left), C (right)
+  Sensors: 1=L, 2=C, 3=R, 4=Touch
+Search mode keeps rotating toward last seen side until line is reacquired.
 Compatible with Python 3.5 (EV3).
 """
 
-from ev3dev2.auto import *
-from time import perf_counter, sleep
+from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C
+from ev3dev2.sensor.lego import ColorSensor, TouchSensor
+from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
+from ev3dev2.sound import Sound
+from ev3dev2.led import Leds
+import time, os, csv
 
 # --- Hardware ---
-motor_der = LargeMotor(OUTPUT_A)
-motor_izq = LargeMotor(OUTPUT_D)
-ojo_der = ColorSensor('in1')
-ojo_med = ColorSensor('in2')
-ojo_izq = ColorSensor('in3')
-touch = TouchSensor('in4')
-snd = Sound()
-leds = Leds()
+lm = LargeMotor(OUTPUT_B)
+rm = LargeMotor(OUTPUT_C)
+csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
+csC = ColorSensor(INPUT_2); csC.mode = 'COL-REFLECT'
+csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
+touch = TouchSensor(INPUT_4)
+snd = Sound(); leds = Leds()
 
-for s in [ojo_izq, ojo_med, ojo_der]:
-    s.mode = 'COL-REFLECT'
+# --- CSV setup ---
+ts = time.strftime("%Y%m%d_%H%M%S")
+log_dir = "/home/robot/logs"
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+csv_path = os.path.join(log_dir, "line_search_" + ts + ".csv")
+f = open(csv_path, "w")
+writer = csv.writer(f)
+writer.writerow(["t","L","C","R","cmdL","cmdR","state"])
+t0 = time.time()
 
-# --- Variables globales ---
-apagado = False
-tiempo_inicio = perf_counter()
-tiempo_ejecucion = 0
-f = open("/home/robot/logs/line_search.csv", "w+")
+# --- Calibration ---
+def wait_press():
+    while not touch.is_pressed:
+        time.sleep(0.05)
+    while touch.is_pressed:
+        time.sleep(0.05)
 
-# --- Calibración ---
-def calibrar():
-    snd.speak('Place sensors on white and press the button.')
-    while not touch.is_pressed: sleep(0.1)
-    while touch.is_pressed: sleep(0.1)
-    blanco = [ojo_izq.value(), ojo_med.value(), ojo_der.value()]
-    print("White:", blanco)
+def avg(sensor, n=10):
+    s = 0
+    for _ in range(n):
+        s += sensor.reflected_light_intensity
+        time.sleep(0.01)
+    return s / float(n)
 
-    snd.speak('Now place sensors on black line and press the button.')
-    while not touch.is_pressed: sleep(0.1)
-    while touch.is_pressed: sleep(0.1)
-    negro = [ojo_izq.value(), ojo_med.value(), ojo_der.value()]
-    print("Black:", negro)
+def calibrate():
+    leds.set_color('LEFT','YELLOW'); leds.set_color('RIGHT','YELLOW')
+    snd.speak("Place sensors on white and press the button.")
+    wait_press()
+    white = [avg(csL), avg(csC), avg(csR)]
+    print("White:", white)
 
-    prom_b = sum(blanco)/3
-    prom_n = sum(negro)/3
-    rango = prom_b - prom_n
+    snd.speak("Now place sensors on black line and press the button.")
+    wait_press()
+    black = [avg(csL), avg(csC), avg(csR)]
+    print("Black:", black)
 
-    VER_NEGRO = prom_n + 0.20*rango
-    VER_GRIS  = prom_n + 0.45*rango
-    VER_BLANCO = prom_n + 0.70*rango
-    snd.speak('Calibration complete.')
-    print("Thresholds:", VER_NEGRO, VER_GRIS, VER_BLANCO)
-    return VER_NEGRO, VER_GRIS, VER_BLANCO
+    b_avg = sum(black)/3.0
+    w_avg = sum(white)/3.0
+    delta = w_avg - b_avg
+    VER_BLACK = b_avg + 0.20*delta
+    VER_GRAY  = b_avg + 0.45*delta
+    VER_WHITE = b_avg + 0.70*delta
 
-VER_NEGRO, VER_GRIS, VER_BLANCO = calibrar()
+    snd.speak("Calibration complete.")
+    leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
+    print("Thresholds -> BLACK={:.1f}  GRAY={:.1f}  WHITE={:.1f}".format(
+        VER_BLACK, VER_GRAY, VER_WHITE))
+    return VER_BLACK, VER_GRAY, VER_WHITE
 
-# --- Velocidades ---
-VEL_ALTA = 80
-VEL_MEDIA = 50
-VEL_BAJA = 10
+VER_BLACK, VER_GRAY, VER_WHITE = calibrate()
 
-# --- Función de búsqueda persistente ---
-def buscar_linea(ultimo_lado):
-    """Busca la línea girando hacia el último lado visto, sin límite de tiempo."""
-    snd.speak('Searching line')
-    leds.set_color('LEFT', 'ORANGE'); leds.set_color('RIGHT', 'ORANGE')
+# --- Speeds ---
+VEL_HIGH = 80
+VEL_MED  = 50
+VEL_LOW  = 10
+
+# --- Search mode ---
+def search_line(last_side):
+    """Rotate indefinitely toward last side until line is found."""
+    snd.speak("Searching line")
+    leds.set_color('LEFT','ORANGE'); leds.set_color('RIGHT','ORANGE')
     while True:
-        # Si se presiona el botón → abortar búsqueda
+        # abort if touch pressed
         if touch.is_pressed:
-            snd.speak('Manual stop.')
-            motor_izq.stop(); motor_der.stop()
+            snd.speak("Manual stop")
+            lm.stop(); rm.stop()
             return False
 
-        val_izq = ojo_izq.value()
-        val_med = ojo_med.value()
-        val_der = ojo_der.value()
-
-        # Si cualquiera ve negro → línea encontrada
-        if val_izq < VER_NEGRO or val_med < VER_NEGRO or val_der < VER_NEGRO:
-            snd.speak('Line reacquired.')
+        L = csL.value(); C = csC.value(); R = csR.value()
+        if L < VER_BLACK or C < VER_BLACK or R < VER_BLACK:
+            snd.speak("Line reacquired")
             leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
             return True
 
-        # Gira continuamente hacia el último lado donde vio línea
-        if ultimo_lado == 'izq':
-            motor_izq.run_forever(speed_sp=VEL_BAJA)
-            motor_der.run_forever(speed_sp=VEL_ALTA)
+        if last_side == 'left':
+            lm.run_forever(speed_sp=VEL_LOW)
+            rm.run_forever(speed_sp=VEL_HIGH)
         else:
-            motor_izq.run_forever(speed_sp=VEL_ALTA)
-            motor_der.run_forever(speed_sp=VEL_BAJA)
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_LOW)
 
-        sleep(0.05)
+        time.sleep(0.05)
 
-# --- Bucle principal ---
-ultimo_lado = 'der'  # lado inicial preferido
-
-snd.speak('Ready. Press button to start.')
-while not touch.is_pressed: sleep(0.1)
-while touch.is_pressed: sleep(0.1)
-snd.speak('Line following started.')
+# --- Main loop ---
+snd.speak("Ready. Press button to start.")
+wait_press()
+snd.speak("Line following started.")
 leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
 
-while not apagado:
-    if touch.is_pressed:  # botón para terminar manualmente
-        snd.speak('Program stopped.')
-        apagado = True
-        break
+running = True
+last_side = 'right'
 
-    val_izq = ojo_izq.value()
-    val_med = ojo_med.value()
-    val_der = ojo_der.value()
-
-    # --- Reglas principales ---
-    if val_izq < VER_NEGRO and val_med < VER_NEGRO:
-        motor_izq.run_forever(speed_sp=VEL_ALTA)
-        motor_der.run_forever(speed_sp=-VEL_BAJA)
-        ultimo_lado = 'der'
-
-    elif val_der < VER_NEGRO and val_med < VER_NEGRO:
-        motor_izq.run_forever(speed_sp=-VEL_BAJA)
-        motor_der.run_forever(speed_sp=VEL_ALTA)
-        ultimo_lado = 'izq'
-
-    elif val_izq < VER_NEGRO:
-        motor_izq.run_forever(speed_sp=VEL_ALTA)
-        motor_der.run_forever(speed_sp=VEL_BAJA)
-        ultimo_lado = 'der'
-
-    elif val_der < VER_NEGRO:
-        motor_izq.run_forever(speed_sp=VEL_BAJA)
-        motor_der.run_forever(speed_sp=VEL_ALTA)
-        ultimo_lado = 'izq'
-
-    elif val_izq < VER_GRIS:
-        motor_izq.run_forever(speed_sp=VEL_ALTA)
-        motor_der.run_forever(speed_sp=VEL_MEDIA)
-        ultimo_lado = 'der'
-
-    elif val_der < VER_GRIS:
-        motor_izq.run_forever(speed_sp=VEL_MEDIA)
-        motor_der.run_forever(speed_sp=VEL_ALTA)
-        ultimo_lado = 'izq'
-
-    elif val_izq > VER_BLANCO and val_med > VER_BLANCO and val_der > VER_BLANCO:
-        print("Line lost → searching", ultimo_lado)
-        motor_izq.stop(); motor_der.stop()
-        if not buscar_linea(ultimo_lado):
-            apagado = True
+try:
+    while running:
+        if touch.is_pressed:
+            snd.speak("Program stopped.")
             break
 
-    else:
-        motor_izq.run_forever(speed_sp=VEL_ALTA)
-        motor_der.run_forever(speed_sp=VEL_ALTA)
+        L = csL.value(); C = csC.value(); R = csR.value()
+        state = "FORWARD"
 
-    f.write("{},{},{}\n".format(val_izq, val_med, val_der))
-    sleep(0.1)
+        # --- logic ---
+        if L < VER_BLACK and C < VER_BLACK:
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=-VEL_LOW)
+            last_side = 'right'; state = "TURN_RIGHT_90"
 
-motor_izq.stop(); motor_der.stop()
-snd.speak('Acknowledged H.Q.')
-f.close()
+        elif R < VER_BLACK and C < VER_BLACK:
+            lm.run_forever(speed_sp=-VEL_LOW)
+            rm.run_forever(speed_sp=VEL_HIGH)
+            last_side = 'left'; state = "TURN_LEFT_90"
+
+        elif L < VER_BLACK:
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_LOW)
+            last_side = 'right'; state = "HARD_RIGHT"
+
+        elif R < VER_BLACK:
+            lm.run_forever(speed_sp=VEL_LOW)
+            rm.run_forever(speed_sp=VEL_HIGH)
+            last_side = 'left'; state = "HARD_LEFT"
+
+        elif L < VER_GRAY:
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_MED)
+            last_side = 'right'; state = "SOFT_RIGHT"
+
+        elif R < VER_GRAY:
+            lm.run_forever(speed_sp=VEL_MED)
+            rm.run_forever(speed_sp=VEL_HIGH)
+            last_side = 'left'; state = "SOFT_LEFT"
+
+        elif L > VER_WHITE and C > VER_WHITE and R > VER_WHITE:
+            print("Line lost → searching", last_side)
+            lm.stop(); rm.stop()
+            if not search_line(last_side):
+                running = False
+                break
+            else:
+                continue  # go back to following
+
+        else:
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_HIGH)
+
+        writer.writerow([round(time.time()-t0,3), L, C, R, lm.speed, rm.speed, state])
+        f.flush()
+        time.sleep(0.1)
+
+except KeyboardInterrupt:
+    pass
+
+finally:
+    lm.stop(); rm.stop()
+    leds.all_off()
+    snd.speak("Mission complete")
+    f.close()
+    print("CSV saved at:", csv_path)
