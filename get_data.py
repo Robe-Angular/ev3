@@ -19,11 +19,16 @@ csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
 snd = Sound(); leds = Leds()
 
+SEARCH_FWD_MIN  = 8     # % mínimo hacia adelante en SEARCH
+SEARCH_TURN     = 6     # giro más suave (antes 11)
+SEARCH_BUMP_FWD = 12    # “empujón” si tarda en re-adquirir
+SEARCH_TIMEOUT  = 0.60  # s: si no re-adquiere, cambiamos táctica
+
 # Línea perdida robusta
 CLEAR_TH     = 0.68   # "muy blanco" (0..1 normalizado)
 DARK_TH      = 0.28   # "negro" (0..1 normalizado)
-LINE_LOST_DEB = 0.10  # s que la condición debe mantenerse para declarar perdida
-REACQ_W      = 0.16   # peso mínimo (1-n) de cualquier sensor para decir "re-adquirí"
+LINE_LOST_DEB = 0.18  # s que la condición debe mantenerse para declarar perdida
+REACQ_W      = 0.10   # peso mínimo (1-n) de cualquier sensor para decir "re-adquirí"
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
 BASE_MAX = 28      # % en rectas
@@ -156,6 +161,10 @@ def slew(prev_cmd, target_cmd, max_delta):
     if target_cmd < prev_cmd - max_delta: return prev_cmd - max_delta
     return target_cmd
 
+def apply_deadzone_search(cmd, dz=SEARCH_FWD_MIN):
+    # En SEARCH nunca dejamos ir por debajo del mínimo hacia adelante
+    return dz if cmd < dz else cmd
+
 # --------- Inicio / CSV ----------
 ts = time.strftime("%Y%m%d_%H%M%S")
 log_dir = "/home/robot/logs"
@@ -215,6 +224,7 @@ wL_prev = wC_prev = wR_prev = 0.0
 d_wL = d_wC = d_wR = 0.0
 warmup = 0.0
 corner_cool = 0
+search_timer = 0.0
 
 try:
     while running:
@@ -240,6 +250,8 @@ try:
         warmup += DT
         KD_eff = KD if warmup >= 0.30 else 0.0
         t_prev = t_now
+        search_timer = search_timer + DT if state == STATE_SEARCH else 0.0
+
 
         # Pesos de "oscuridad" (línea)
         wL, wC, wR = 1.0-L, 1.0-C, 1.0-R
@@ -401,24 +413,39 @@ try:
                 last_seen_dir = side
                 corner_is_hard = False
 
-        elif state == STATE_SEARCH: 
+        elif state == STATE_SEARCH:
             side = last_seen_dir if last_seen_dir != 0 else +1
-            turn = SEARCH_SPEED
-            base = SEARCH_SPEED
+            base = 0  # no usamos 'base' aquí
 
-            # Pequeño avance + giro → espiral suave
-            FWD_SEARCH = 3.0  # % de "adelante" (ajusta 2..5)
-            cmdL_target = FWD_SEARCH - side * turn
-            cmdR_target = FWD_SEARCH + side * turn
+            # Giro suave + avance (sin reversa)
+            fwd  = SEARCH_FWD_MIN
+            turn = SEARCH_TURN
+
+            # Si lleva mucho sin re-adquirir, cambia estrategia: más avance y cambia el lado
+            if search_timer >= SEARCH_TIMEOUT:
+                side = -side              # invierte espiral
+                last_seen_dir = side
+                fwd  = SEARCH_BUMP_FWD    # empujón hacia delante
+                turn = SEARCH_TURN - 2    # un poco menos de giro para proyectar
+                search_timer = 0.0        # reinicia timer
+
+            # Comandos crudos
+            cmdL_target = fwd - side * turn
+            cmdR_target = fwd + side * turn
+
+            # --- FORZAR AVANCE: nunca reversa en SEARCH ---
+            if cmdL_target < SEARCH_FWD_MIN: cmdL_target = SEARCH_FWD_MIN
+            if cmdR_target < SEARCH_FWD_MIN: cmdR_target = SEARCH_FWD_MIN
 
             pos = 0.0; err = 0.0; derr = 0.0; steer = side*turn  # log
 
-            # Sal de búsqueda si vemos "algo de línea" (cualquiera oscuro) o esquina
-            reacq = (wL >= REACQ_W) or (wC >= REACQ_W) or (wR >= REACQ_W)
+            # Salida de SEARCH si vemos “algo” o esquina
+            reacq = (wL >= REACQ_W) or (wC >= REACQ_W) or (wR >= REACQ_W) or (C <= CENTER_ON_LINE_TH)
             if reacq or is_corner:
                 state = STATE_NORMAL
                 corner_deb = 0.0
                 line_lost_deb_timer = 0.0
+                search_timer = 0.0
 
 
         # Salida común
@@ -427,12 +454,20 @@ try:
 
         cmdL = clamp(slew(prev_cmdL, cmdL_target, MAX_DELTA), -SPEED_CLAMP, SPEED_CLAMP)
         cmdR = clamp(slew(prev_cmdR, cmdR_target, MAX_DELTA), -SPEED_CLAMP, SPEED_CLAMP)
+
         prev_cmdL, prev_cmdR = cmdL, cmdR
 
-        cmdL = apply_deadzone(cmdL)
-        cmdR = apply_deadzone(cmdR)
+        # Dead-zone según estado
+        if state == STATE_SEARCH:
+            cmdL = apply_deadzone_search(cmdL, SEARCH_FWD_MIN)
+            cmdR = apply_deadzone_search(cmdR, SEARCH_FWD_MIN)
+        else:
+            cmdL = apply_deadzone(cmdL)
+            cmdR = apply_deadzone(cmdR)
+
         lm.on(SpeedPercent(cmdL * MOTOR_GAIN))
         rm.on(SpeedPercent(cmdR * MOTOR_GAIN))
+
 
         # Log
         writer.writerow([
