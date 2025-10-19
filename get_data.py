@@ -132,89 +132,89 @@ def parse_cli_and_apply_defaults():
     # devuelve diccionario final para log
     return chosen
 
-# # --- Blind steer más suave/proporcional ---
-# BLIND_SUMW        = 0.14   # antes 0.20 (activa blind solo si los lados están MUY blancos)
-# BLIND_C_TH        = 0.68   # sube el requisito de C claro
-# BLIND_STEER_MIN   = 8.0    # antes 16.0 → giro mínimo más chico
-# BLIND_STEER_MAX   = 14.0   # tope de giro en blind (antes no teníamos)
-# BLIND_BASE_DROP   = 4      # baja la base en blind para no “salirte patinando”
-# STEER_ZERO_TH     = 0.3    # antes 0.5 (deja pasar giros chicos útiles)
+# --- Blind steer más suave/proporcional ---
+BLIND_SUMW        = 0.14   # antes 0.20 (activa blind solo si los lados están MUY blancos)
+BLIND_C_TH        = 0.68   # sube el requisito de C claro
+BLIND_STEER_MIN   = 8.0    # antes 16.0 → giro mínimo más chico
+BLIND_STEER_MAX   = 14.0   # tope de giro en blind (antes no teníamos)
+BLIND_BASE_DROP   = 4      # baja la base en blind para no “salirte patinando”
+STEER_ZERO_TH     = 0.3    # antes 0.5 (deja pasar giros chicos útiles)
 
-# # SEARCH sin reversa
-# SEARCH_FWD_MIN   = 9     # antes 10-12 → menos proyección recta
-# SEARCH_TURN      = 7     # era 5 → más giro
-# SEARCH_BUMP_FWD  = 13    # era 14
-# SEARCH_TIMEOUT   = 0.55  # era 0.60
-# SEARCH_KICK_TURN = 12
-# SEARCH_KICK_T    = 0.30
-# SEARCH_BIAS      = 2.0   # NUEVO: asimetría extra de avance al lado elegido
+# SEARCH sin reversa
+SEARCH_FWD_MIN   = 9     # antes 10-12 → menos proyección recta
+SEARCH_TURN      = 7     # era 5 → más giro
+SEARCH_BUMP_FWD  = 13    # era 14
+SEARCH_TIMEOUT   = 0.55  # era 0.60
+SEARCH_KICK_TURN = 12
+SEARCH_KICK_T    = 0.30
+SEARCH_BIAS      = 2.0   # NUEVO: asimetría extra de avance al lado elegido
 
-# # Línea perdida robusta
-# # Más tolerante para re-adquirir y más difícil caer a SEARCH
-# CLEAR_TH       = 0.56      # antes 0.68
-# CLEAR_TH_HI    = 0.58   # antes 0.60 (o 0.62 si aún cae de más)
-# CLEAR_TH_LO    = 0.52   # zona de salida de "todo blanco"
-# LINE_LOST_DEB  = 0.28   # antes 0.22 → más filtro
-# REACQ_W = 0.22
-# CENTER_ON_LINE_TH = 0.40
-# # --------- Parámetros ----------
-# # Velocidad adaptativa: base cae cuando el error es grande
-# BASE_MAX = 26      # % en rectas
-# BASE_MIN = 16       # % en curvas duras
-# K_SPEED  = 28      # caída por |err| (suave = 18..28)
+# Línea perdida robusta
+# Más tolerante para re-adquirir y más difícil caer a SEARCH
+CLEAR_TH       = 0.56      # antes 0.68
+CLEAR_TH_HI    = 0.58   # antes 0.60 (o 0.62 si aún cae de más)
+CLEAR_TH_LO    = 0.52   # zona de salida de "todo blanco"
+LINE_LOST_DEB  = 0.28   # antes 0.22 → más filtro
+REACQ_W = 0.22
+CENTER_ON_LINE_TH = 0.40
+# --------- Parámetros ----------
+# Velocidad adaptativa: base cae cuando el error es grande
+BASE_MAX = 26      # % en rectas
+BASE_MIN = 16       # % en curvas duras
+K_SPEED  = 28      # caída por |err| (suave = 18..28)
 
-# # Dead-zone (nuevo)
-# DEADZONE_MIN = 12.0  # % mínimo efectivo de motor
+# Dead-zone (nuevo)
+DEADZONE_MIN = 12.0  # % mínimo efectivo de motor
 
-# # Control PD (realmente PD; integral NO para evitar windup)
-# KP = 52.0          # 40..120
-# KD = 9.0          # 6..16
-# TURN_CLAMP   = 30  # tope giro
-# SPEED_CLAMP  = 70  # tope motor
-# MOTOR_GAIN   = 1.00
-# MAX_DELTA    = 4.0 # rampa real (ANTES 60 → demasiado alto)
+# Control PD (realmente PD; integral NO para evitar windup)
+KP = 52.0          # 40..120
+KD = 9.0          # 6..16
+TURN_CLAMP   = 30  # tope giro
+SPEED_CLAMP  = 70  # tope motor
+MOTOR_GAIN   = 1.00
+MAX_DELTA    = 4.0 # rampa real (ANTES 60 → demasiado alto)
 
-# # Esquina aguda (dos sensores negros)
-# HARD_DEEP     = 0.35    # antes 0.30  → detecta negro "duro" un poco antes
-# HARD_CLEAR    = 0.75    # antes 0.70  → exige blanco más claro del lado opuesto
-# HARD_MIN_HOLD = 0.40    # 0.40–0.45
-# HARD_ARC_FWD   = 14        # % avance en el arco duro
-# HARD_ARC_DIFF  = 20       # % diferencial para “morder” el giro duro
+# Esquina aguda (dos sensores negros)
+HARD_DEEP     = 0.35    # antes 0.30  → detecta negro "duro" un poco antes
+HARD_CLEAR    = 0.75    # antes 0.70  → exige blanco más claro del lado opuesto
+HARD_MIN_HOLD = 0.40    # 0.40–0.45
+HARD_ARC_FWD   = 14        # % avance en el arco duro
+HARD_ARC_DIFF  = 20       # % diferencial para “morder” el giro duro
 
 # # Señal de giro por si queda invertido (+1 o -1)
-# TURN_SIGN    = +1  # si gira al revés, pon -1
+TURN_SIGN    = +1  # si gira al revés, pon -1
 
-# # Línea perdida / esquina usando NORMALIZADOS
-# # (0 ~ negro línea, 1 ~ blanco fondo tras calibración)
-# LINE_LOST_SUMW = 0.08      # si (wL+wC+wR)<esto ⇒ casi todo blanco
-# PIVOT_SPEED    = 12
-# SEARCH_SPEED   = 11
+# Línea perdida / esquina usando NORMALIZADOS
+# (0 ~ negro línea, 1 ~ blanco fondo tras calibración)
+LINE_LOST_SUMW = 0.08      # si (wL+wC+wR)<esto ⇒ casi todo blanco
+PIVOT_SPEED    = 12
+SEARCH_SPEED   = 11
 
 # # --- Esquinas robustas ---
-# C_HOOK        = 0.15    # 0.12–0.18; si el centro es más gris, súbelo
-# CORNER_DEEP   = 0.20    # antes 0.18
-# CORNER_CLEAR  = 0.82    # antes 0.78
-# CORNER_DEBOUNCE = 0.08   # antes 0.10
+C_HOOK        = 0.15    # 0.12–0.18; si el centro es más gris, súbelo
+CORNER_DEEP   = 0.20    # antes 0.18
+CORNER_CLEAR  = 0.82    # antes 0.78
+CORNER_DEBOUNCE = 0.08   # antes 0.10
 
 
-# CORNER_MIN_HOLD  = 0.28   # s que nos quedamos en modo esquina como mínimo
-# CORNER_MAX_HOLD  = 0.80   # s de seguridad para no quedarnos atrapados
-# CORNER_PIVOT     = 11      # % base para pivot
-# CORNER_ARC_FWD   = 12      # % componente hacia adelante para escapar
-# CORNER_ARC_DIFF  = 16     # % diferencial para “morder” la esquina
+CORNER_MIN_HOLD  = 0.28   # s que nos quedamos en modo esquina como mínimo
+CORNER_MAX_HOLD  = 0.80   # s de seguridad para no quedarnos atrapados
+CORNER_PIVOT     = 11      # % base para pivot
+CORNER_ARC_FWD   = 12      # % componente hacia adelante para escapar
+CORNER_ARC_DIFF  = 16     # % diferencial para “morder” la esquina
 
 # # Derivativo suavizado (filtro exponencial)
-# D_ALPHA = 0.30
-# P_ALPHA = 0.25   # suaviza pos
-# S_ALPHA = 0.35   # suaviza mando de giro
+D_ALPHA = 0.30
+P_ALPHA = 0.25   # suaviza pos
+S_ALPHA = 0.35   # suaviza mando de giro
 
 # # --- Nuevos (añade estos) ---
-# CORNER_FWD_MIN     = 12          # ambas ruedas ≥ este % en esquina
-# CORNER_COOLDOWN    = 0.18        # tras salir de esquina, ignora nueva esquina
+CORNER_FWD_MIN     = 12          # ambas ruedas ≥ este % en esquina
+CORNER_COOLDOWN    = 0.18        # tras salir de esquina, ignora nueva esquina
 
-# STEER_SAT_TH         = 12.0     # antes 0.8*TURN_CLAMP → demasiado alto
-# STEER_SAT_TIME       = 0.10     # baja un poquito
-# C_BRIGHT_FOR_CORNER  = 0.50     # 0.60 era muy exigente
+STEER_SAT_TH         = 12.0     # antes 0.8*TURN_CLAMP → demasiado alto
+STEER_SAT_TIME       = 0.10     # baja un poquito
+C_BRIGHT_FOR_CORNER  = 0.50     # 0.60 era muy exigente
 
 line_lost_deb_timer = 0.0
 # --------- Utils ----------
