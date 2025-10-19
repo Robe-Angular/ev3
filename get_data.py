@@ -31,7 +31,7 @@ BASE_MIN = 18       # % en curvas duras
 K_SPEED  = 24      # caída por |err| (suave = 18..28)
 
 # Dead-zone (nuevo)
-DEADZONE_MIN = 14.0  # % mínimo efectivo de motor
+DEADZONE_MIN = 12.0  # % mínimo efectivo de motor
 
 # Control PD (realmente PD; integral NO para evitar windup)
 KP = 38.0          # 40..120
@@ -42,11 +42,11 @@ MOTOR_GAIN   = 1.00
 MAX_DELTA    = 8.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Esquina aguda (dos sensores negros)
-HARD_DEEP      = 0.28     # 0..1 (negro). Sube a 0.32 si tu negro es muy oscuro
-HARD_CLEAR     = 0.65     # 0..1 (blanco). Baja a 0.60 si el fondo es gris
-HARD_MIN_HOLD  = 0.35     # s de compromiso mínimo (más que corner normal)
-HARD_ARC_FWD   = 8        # % avance en el arco duro
-HARD_ARC_DIFF  = 14       # % diferencial para “morder” el giro duro
+HARD_DEEP      = 0.26     # 0..1 (negro). Sube a 0.32 si tu negro es muy oscuro
+HARD_CLEAR     = 0.62     # 0..1 (blanco). Baja a 0.60 si el fondo es gris
+HARD_MIN_HOLD  = 0.45     # s de compromiso mínimo (más que corner normal)
+HARD_ARC_FWD   = 14        # % avance en el arco duro
+HARD_ARC_DIFF  = 20       # % diferencial para “morder” el giro duro
 
 # Señal de giro por si queda invertido (+1 o -1)
 TURN_SIGN    = +1  # si gira al revés, pon -1
@@ -62,15 +62,20 @@ CORNER_DEEP      = 0.18   # lado muy negro (0..1 normalizado)
 CORNER_CLEAR     = 0.78   # los otros muy blancos
 CORNER_DEBOUNCE  = 0.08   # s que debe durar la condición para aceptar esquina
 CORNER_MIN_HOLD  = 0.28   # s que nos quedamos en modo esquina como mínimo
-CORNER_MAX_HOLD  = 0.70   # s de seguridad para no quedarnos atrapados
+CORNER_MAX_HOLD  = 0.80   # s de seguridad para no quedarnos atrapados
 CORNER_PIVOT     = 11      # % base para pivot
-CORNER_ARC_FWD   = 10      # % componente hacia adelante para escapar
-CORNER_ARC_DIFF  = 20     # % diferencial para “morder” la esquina
+CORNER_ARC_FWD   = 12      # % componente hacia adelante para escapar
+CORNER_ARC_DIFF  = 16     # % diferencial para “morder” la esquina
 
 # Derivativo suavizado (filtro exponencial)
 D_ALPHA = 0.30
 P_ALPHA = 0.25   # suaviza pos
 S_ALPHA = 0.35   # suaviza mando de giro
+
+# --- Nuevos (añade estos) ---
+CORNER_FWD_MIN     = 12          # ambas ruedas ≥ este % en esquina
+CENTER_ON_LINE_TH  = 0.60        # C ≤ esto cuenta como “ya tomé línea”
+CORNER_COOLDOWN    = 0.18        # tras salir de esquina, ignora nueva esquina
 
 line_lost_deb_timer = 0.0
 # --------- Utils ----------
@@ -230,6 +235,7 @@ try:
         # DT real
         t_now = time.time()
         DT = max(0.01, t_now - t_prev)   # evita DT=0
+        corner_cool = max(0.0, corner_cool - DT)
         warmup += DT
         KD_eff = KD if warmup >= 0.30 else 0.0
         t_prev = t_now
@@ -274,6 +280,7 @@ try:
             corner_deb = 0.0
 
         is_corner = (corner_deb >= CORNER_DEBOUNCE)
+        corner_cool = 0.0  # NUEVO: tiempo restante de enfriamiento post-esquina
 
         # ----- FSM -----
         if state == STATE_NORMAL:
@@ -281,68 +288,81 @@ try:
             pos = 0.0; err = 0.0; derr = 0.0; steer = 0.0; base = BASE_MIN
             cmdL_target = 0.0; cmdR_target = 0.0
             C_HOOK = 0.18   # sube a 0.18 si tu línea es más gris
-            if (C <= C_HOOK) and (L >= CLEAR_TH) and (R >= CLEAR_TH):
-                # decide el lado por tendencia reciente (qué lado se oscureció más)
+            # ---------- NUEVO BLOQUE DE COOLDOWN ----------
+            if corner_cool > 0.0:
+                # En enfriamiento: NO detectes esquina nueva
+                is_corner = False
+                is_corner_raw = False
+                hard_left = hard_right = False
+                skip_corner = True
+            else:
+                # Detectores normales (solo si NO hay cooldown)
+                hard_left  = (L <= HARD_DEEP and C <= HARD_DEEP and R >= HARD_CLEAR)
+                hard_right = (R <= HARD_DEEP and C <= HARD_DEEP and L >= HARD_CLEAR)
+                # 'is_corner' / 'is_corner_raw' ya los traes calculados arriba con debounce
+                skip_corner = False
+            # ---------- FIN COOLDOWN ----------
+
+            if (not skip_corner) and (C <= C_HOOK) and (L >= CLEAR_TH) and (R >= CLEAR_TH):
+                # Hook central: decide lado por tendencia reciente
                 side_by_trend = +1 if (d_wR > d_wL) else -1
                 corner_side = side_by_trend if (d_wL != 0.0 or d_wR != 0.0) else (last_seen_dir if last_seen_dir != 0 else +1)
 
                 last_seen_dir = corner_side
                 state = STATE_CORNER
                 corner_hold = 0.0
-                corner_is_hard = False   # es una esquina, pero no "hard" de 2 sensores
-            else:
-                # PRIORIDAD: hard-turn
-                if hard_left or hard_right:
-                    corner_side = -1 if hard_left else +1
-                    last_seen_dir = corner_side
-                    state = STATE_CORNER
-                    corner_hold = 0.0
-                    # etiqueta este corner como "duro" guardando params en locals
-                    corner_is_hard = True
-                elif is_corner:
-                    corner_side = +1 if (wR > wL) else -1
-                    last_seen_dir = corner_side          # <--- añade esto
-                    state = STATE_CORNER
-                    corner_hold = 0.0
-                elif line_lost:
-                    state = STATE_SEARCH
-                else:
-            
-                    # ---------- PD normal ----------
-                    pos_raw = (-1.0*wL + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
+                corner_is_hard = False   # esquina normal
+            elif (not skip_corner) and (hard_left or hard_right):
+                corner_side = -1 if hard_left else +1
+                last_seen_dir = corner_side
+                state = STATE_CORNER
+                corner_hold = 0.0
+                corner_is_hard = True    # hard-turn
+            elif (not skip_corner) and is_corner:
+                corner_side = +1 if (wR > wL) else -1
+                last_seen_dir = corner_side
+                state = STATE_CORNER
+                corner_hold = 0.0
+            elif line_lost:
+                state = STATE_SEARCH
+            # ---------- CONTROL PD SOLO SI SIGUES EN NORMAL ----------
+        if state == STATE_NORMAL:
+            # PD normal
+            pos_raw = (-1.0*wL + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
 
-                
-                try:
-                    pos = (1.0 - P_ALPHA)*pos + P_ALPHA*pos_raw
-                except NameError:
-                    pos = pos_raw
+            try:
+                pos = (1.0 - P_ALPHA)*pos + P_ALPHA*pos_raw
+            except NameError:
+                pos = pos_raw
 
-                dpos = (pos - locals().get('pos_prev', pos)) / DT
-                pos_prev = pos
-                err  = -pos
-                derr = -dpos   # derivada sobre medición → amortigua mejor
+            dpos = (pos - locals().get('pos_prev', pos)) / DT
+            pos_prev = pos
+            err  = -pos
+            derr = -dpos   # derivada sobre medición → amortigua mejor
 
-                base = clamp(BASE_MAX - K_SPEED*abs(err), BASE_MIN, BASE_MAX)
+            base = clamp(BASE_MAX - K_SPEED*abs(err), BASE_MIN, BASE_MAX)
 
-                steer = TURN_SIGN * (KP*err + KD*derr)
-                steer = clamp(steer, -TURN_CLAMP, TURN_CLAMP)
+            # Si metiste el “warmup” de KD, usa KD_eff; si no, deja KD:
+            KD_eff = KD if warmup >= 0.30 else 0.0  # opcional
+            steer = TURN_SIGN * (KP*err + KD_eff*derr)
+            steer = clamp(steer, -TURN_CLAMP, TURN_CLAMP)
 
-                try:
-                    steer = (1.0 - S_ALPHA)*steer_prev + S_ALPHA*steer
-                except NameError:
-                    pass
-                steer_prev = steer
-
-                if abs(steer) < 1.5:
-                    steer = 0.0
-
-                cmdL_target = base - steer/2.0
-                cmdR_target = base + steer/2.0
-
-                # recordar lado más oscuro por si toca SEARCH
-                if (wL > wR and wL > wC): last_seen_dir = -1
-                elif (wR > wL and wR > wC): last_seen_dir = +1
+            try:
+                steer = (1.0 - S_ALPHA)*steer_prev + S_ALPHA*steer
+            except NameError:
                 pass
+            steer_prev = steer
+
+            if abs(steer) < 1.5:
+                steer = 0.0
+
+            cmdL_target = base - steer/2.0
+            cmdR_target = base + steer/2.0
+
+            # recordar lado más oscuro por si toca SEARCH
+            if (wL > wR and wL > wC): last_seen_dir = -1
+            elif (wR > wL and wR > wC): last_seen_dir = +1
+            
         elif state == STATE_CORNER:
             corner_hold += DT
             # arco de escape: un poco adelante + diferencial fuerte hacia el lado
@@ -363,6 +383,10 @@ try:
             base = fwd
             cmdL_target = fwd + diff/2.0
             cmdR_target = fwd - diff/2.0
+            # --- NUEVO: obliga avance mínimo en ambas ruedas ---
+            cmdL_target = max(cmdL_target, CORNER_FWD_MIN)
+            cmdR_target = max(cmdR_target, CORNER_FWD_MIN)
+
             pos = side * 1.0; err = pos; derr = 0.0; steer = diff  # solo para log
 
             # criterios de salida: mínimo tiempo + ya no corner o centro toca línea o timeout
