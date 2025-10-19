@@ -10,7 +10,7 @@ Ports:
 CSV: /home/robot/logs/smart_log_YYYYmmdd_HHMMSS.csv
 """
 
-from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C
+from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C, SpeedPercent
 from ev3dev2.sensor.lego import ColorSensor, TouchSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
 from ev3dev2.sound import Sound
@@ -96,22 +96,24 @@ calibL, calibC, calibR, CLEAR_HI, CLEAR_LO, CENTER_ON_LINE = calibrate()
 
 # ---------------- Params (smart/simple) ----------------
 # P follower
-KP          = 52.0    # 45..80 según tu pista
-TURN_CLAMP  = 40.0
-BASE_MAX    = 24.0
-BASE_MIN    = 12.0
-K_SPEED     = 24.0    # baja base cuando |pos| grande
+# --- Params más ágiles ---
+KP         = 60.0     # más nervioso para curvas
+TURN_CLAMP = 50.0
+BASE_MAX   = 45.0     # antes 24
+BASE_MIN   = 20.0     # antes 12
+K_SPEED    = 18.0     # cae menos la base
 
 # Blind steer (cuando centro claro y lados muy blancos)
 BLIND_SUMW  = 0.14
 BLIND_C_TH  = 0.65
-BLIND_STEER = 10.0
-BLIND_DROP  = 3.0
+BLIND_STEER = 12.0
+BLIND_DROP  = 4.0
 
 # Search (sin reversa)
-SEARCH_FWD  = 12.0
-SEARCH_TURN = 10.0
-SEARCH_SIDE_SWITCH = 1.2   # s antes de alternar lado si nada aparece
+SEARCH_FWD  = 22.0
+SEARCH_TURN = 16.0
+SEARCH_SIDE_SWITCH = 1.0
+
 
 # Debounce / cooldown
 LINE_LOST_DEB = 0.20   # s en “todo blanco” para declarar pérdida
@@ -132,8 +134,9 @@ def motors_from_steer(base, steer):
     return cmdL, cmdR
 
 def set_motors(cmdL, cmdR):
-    lm.run_forever(speed_sp=int(cmdL))
-    rm.run_forever(speed_sp=int(cmdR))
+    # cmdL/cmdR en porcentaje 0..100
+    lm.on(SpeedPercent(int(clamp(cmdL, -100, 100))))
+    rm.on(SpeedPercent(int(clamp(cmdR, -100, 100))))
 
 # ---------------- Main loop ----------------
 snd.speak("Ready. Press button to start.")
