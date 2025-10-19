@@ -54,8 +54,8 @@ K_SPEED  = 28      # caída por |err| (suave = 18..28)
 DEADZONE_MIN = 12.0  # % mínimo efectivo de motor
 
 # Control PD (realmente PD; integral NO para evitar windup)
-KP = 42.0          # 40..120
-KD = 8.0          # 6..16
+KP = 52.0          # 40..120
+KD = 9.0          # 6..16
 TURN_CLAMP   = 30  # tope giro
 SPEED_CLAMP  = 70  # tope motor
 MOTOR_GAIN   = 1.00
@@ -99,9 +99,9 @@ S_ALPHA = 0.35   # suaviza mando de giro
 CORNER_FWD_MIN     = 12          # ambas ruedas ≥ este % en esquina
 CORNER_COOLDOWN    = 0.18        # tras salir de esquina, ignora nueva esquina
 
-STEER_SAT_TH    = TURN_CLAMP * 0.80  # umbral de saturación (~80% del tope)
-STEER_SAT_TIME  = 0.12               # mantenerlo así por ≥120 ms
-C_BRIGHT_FOR_CORNER = 0.60           # centro lo bastante claro
+STEER_SAT_TH         = 12.0     # antes 0.8*TURN_CLAMP → demasiado alto
+STEER_SAT_TIME       = 0.10     # baja un poquito
+C_BRIGHT_FOR_CORNER  = 0.50     # 0.60 era muy exigente
 
 line_lost_deb_timer = 0.0
 # --------- Utils ----------
@@ -348,6 +348,32 @@ try:
                 skip_corner = False
             # ---------- FIN COOLDOWN ----------
 
+            # --- PRE-SEARCH SNATCH: si estamos por perder la línea, forzamos CORNER hacia el lado con más 'negro' ---
+            if line_lost:
+                # diferencia de oscuridad entre lados (0..1 aprox)
+                diff = (wR - wL)
+                DIFF_TH = 0.05   # si tu mesa es ruidosa, sube a 0.06–0.08
+
+                if diff > DIFF_TH:
+                    corner_side = +1
+                    last_seen_dir = +1
+                    state = STATE_CORNER
+                    corner_hold = 0.0
+                    corner_is_hard = True   # muerde fuerte la L
+                    continue
+                    # evita caer a SEARCH en este ciclo
+                elif diff < -DIFF_TH:
+                    corner_side = -1
+                    last_seen_dir = -1
+                    state = STATE_CORNER
+                    corner_hold = 0.0
+                    corner_is_hard = True
+                    continue
+                else:
+                    # si no hay lado claro, recién ahí caemos a SEARCH
+                    state = STATE_SEARCH
+                    continue
+
             if (not skip_corner) and (C <= C_HOOK) and (L >= CLEAR_TH) and (R >= CLEAR_TH):
                 # Hook central: decide lado por tendencia reciente
                 side_by_trend = +1 if (d_wR > d_wL) else -1
@@ -368,9 +394,8 @@ try:
                 last_seen_dir = corner_side
                 state = STATE_CORNER
                 corner_hold = 0.0
-            elif line_lost and (wL + wC + wR) <= LINE_LOST_SUMW:
-                state = STATE_SEARCH
-            # ---------- CONTROL PD SOLO SI SIGUES EN NORMAL ----------
+
+        # ---------- CONTROL PD SOLO SI SIGUES EN NORMAL ----------
         if state == STATE_NORMAL:
             # PD normal
             pos_raw = (-1.0*wL + 1.0*wR) / (sumw if sumw>1e-6 else 1.0)
