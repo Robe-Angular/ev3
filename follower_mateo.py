@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 Line follower with automatic calibration and persistent search mode.
-Uses ports:
+Ports:
   Motors:  B (left), C (right)
   Sensors: 1=L, 2=C, 3=R, 4=Touch
-Search mode keeps rotating toward last seen side until line is reacquired.
+Rotates toward the correct side of the detected line (fixed logic).
 Compatible with Python 3.5 (EV3).
 """
 
@@ -88,7 +88,6 @@ def search_line(last_side):
     snd.speak("Searching line")
     leds.set_color('LEFT','ORANGE'); leds.set_color('RIGHT','ORANGE')
     while True:
-        # abort if touch pressed
         if touch.is_pressed:
             snd.speak("Manual stop")
             lm.stop(); rm.stop()
@@ -101,11 +100,13 @@ def search_line(last_side):
             return True
 
         if last_side == 'left':
-            lm.run_forever(speed_sp=VEL_LOW)
+            # giro hacia la izquierda
+            lm.run_forever(speed_sp=-VEL_LOW)
             rm.run_forever(speed_sp=VEL_HIGH)
         else:
+            # giro hacia la derecha
             lm.run_forever(speed_sp=VEL_HIGH)
-            rm.run_forever(speed_sp=VEL_LOW)
+            rm.run_forever(speed_sp=-VEL_LOW)
 
         time.sleep(0.05)
 
@@ -127,45 +128,49 @@ try:
         L = csL.value(); C = csC.value(); R = csR.value()
         state = "FORWARD"
 
-        # --- logic ---
+        # --- logic (corrected directions) ---
         if L < VER_BLACK and C < VER_BLACK:
-            lm.run_forever(speed_sp=VEL_HIGH)
-            rm.run_forever(speed_sp=-VEL_LOW)
-            last_side = 'right'; state = "TURN_RIGHT_90"
-
-        elif R < VER_BLACK and C < VER_BLACK:
+            # curva 90° izquierda
             lm.run_forever(speed_sp=-VEL_LOW)
             rm.run_forever(speed_sp=VEL_HIGH)
             last_side = 'left'; state = "TURN_LEFT_90"
 
-        elif L < VER_BLACK:
+        elif R < VER_BLACK and C < VER_BLACK:
+            # curva 90° derecha
             lm.run_forever(speed_sp=VEL_HIGH)
-            rm.run_forever(speed_sp=VEL_LOW)
-            last_side = 'right'; state = "HARD_RIGHT"
+            rm.run_forever(speed_sp=-VEL_LOW)
+            last_side = 'right'; state = "TURN_RIGHT_90"
 
-        elif R < VER_BLACK:
+        elif L < VER_BLACK:
+            # línea a la izquierda → gira izquierda
             lm.run_forever(speed_sp=VEL_LOW)
             rm.run_forever(speed_sp=VEL_HIGH)
             last_side = 'left'; state = "HARD_LEFT"
 
-        elif L < VER_GRAY:
+        elif R < VER_BLACK:
+            # línea a la derecha → gira derecha
             lm.run_forever(speed_sp=VEL_HIGH)
-            rm.run_forever(speed_sp=VEL_MED)
-            last_side = 'right'; state = "SOFT_RIGHT"
+            rm.run_forever(speed_sp=VEL_LOW)
+            last_side = 'right'; state = "HARD_RIGHT"
 
-        elif R < VER_GRAY:
+        elif L < VER_GRAY:
             lm.run_forever(speed_sp=VEL_MED)
             rm.run_forever(speed_sp=VEL_HIGH)
             last_side = 'left'; state = "SOFT_LEFT"
 
+        elif R < VER_GRAY:
+            lm.run_forever(speed_sp=VEL_HIGH)
+            rm.run_forever(speed_sp=VEL_MED)
+            last_side = 'right'; state = "SOFT_RIGHT"
+
         elif L > VER_WHITE and C > VER_WHITE and R > VER_WHITE:
-            print("Line lost searching", last_side)
+            print("Line lost → searching", last_side)
             lm.stop(); rm.stop()
             if not search_line(last_side):
                 running = False
                 break
             else:
-                continue  # go back to following
+                continue
 
         else:
             lm.run_forever(speed_sp=VEL_HIGH)
