@@ -19,37 +19,39 @@ csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
 snd = Sound(); leds = Leds()
 
-SEARCH_FWD_MIN  = 8     # % mínimo hacia adelante en SEARCH
-SEARCH_TURN     = 6     # giro más suave (antes 11)
-SEARCH_BUMP_FWD = 12    # “empujón” si tarda en re-adquirir
-SEARCH_TIMEOUT  = 0.60  # s: si no re-adquiere, cambiamos táctica
+# SEARCH sin reversa
+SEARCH_FWD_MIN  = 10   # si patina, 12
+SEARCH_TURN     = 5    # era 6
+SEARCH_BUMP_FWD = 14
+SEARCH_TIMEOUT  = 0.60
+CENTER_ON_LINE_TH = 0.55  # baja de 0.60 → no salga de SEARCH por gris tenue
 
 # Línea perdida robusta
-CLEAR_TH     = 0.68   # "muy blanco" (0..1 normalizado)
-DARK_TH      = 0.28   # "negro" (0..1 normalizado)
-LINE_LOST_DEB = 0.18  # s que la condición debe mantenerse para declarar perdida
-REACQ_W      = 0.10   # peso mínimo (1-n) de cualquier sensor para decir "re-adquirí"
+# Más tolerante para re-adquirir y más difícil caer a SEARCH
+CLEAR_TH       = 0.60      # antes 0.68
+LINE_LOST_DEB  = 0.22      # antes 0.10
+REACQ_W        = 0.12      # antes 0.16
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
-BASE_MAX = 28      # % en rectas
-BASE_MIN = 18       # % en curvas duras
-K_SPEED  = 24      # caída por |err| (suave = 18..28)
+BASE_MAX = 26      # % en rectas
+BASE_MIN = 16       # % en curvas duras
+K_SPEED  = 28      # caída por |err| (suave = 18..28)
 
 # Dead-zone (nuevo)
 DEADZONE_MIN = 12.0  # % mínimo efectivo de motor
 
 # Control PD (realmente PD; integral NO para evitar windup)
-KP = 38.0          # 40..120
-KD = 10.0          # 6..16
-TURN_CLAMP   = 35  # tope giro
+KP = 42.0          # 40..120
+KD = 8.0          # 6..16
+TURN_CLAMP   = 30  # tope giro
 SPEED_CLAMP  = 70  # tope motor
 MOTOR_GAIN   = 1.00
-MAX_DELTA    = 8.0 # rampa real (ANTES 60 → demasiado alto)
+MAX_DELTA    = 6.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Esquina aguda (dos sensores negros)
-HARD_DEEP      = 0.26     # 0..1 (negro). Sube a 0.32 si tu negro es muy oscuro
-HARD_CLEAR     = 0.62     # 0..1 (blanco). Baja a 0.60 si el fondo es gris
-HARD_MIN_HOLD  = 0.45     # s de compromiso mínimo (más que corner normal)
+HARD_DEEP     = 0.30    # antes 0.26
+HARD_CLEAR    = 0.70    # antes 0.62
+HARD_MIN_HOLD = 0.40    # 0.40–0.45
 HARD_ARC_FWD   = 14        # % avance en el arco duro
 HARD_ARC_DIFF  = 20       # % diferencial para “morder” el giro duro
 
@@ -63,9 +65,12 @@ PIVOT_SPEED    = 12
 SEARCH_SPEED   = 11
 
 # --- Esquinas robustas ---
-CORNER_DEEP      = 0.18   # lado muy negro (0..1 normalizado)
-CORNER_CLEAR     = 0.78   # los otros muy blancos
-CORNER_DEBOUNCE  = 0.08   # s que debe durar la condición para aceptar esquina
+C_HOOK        = 0.15    # 0.12–0.18; si el centro es más gris, súbelo
+CORNER_DEEP   = 0.20    # antes 0.18
+CORNER_CLEAR  = 0.82    # antes 0.78
+CORNER_DEBOUNCE = 0.10  # antes 0.08
+
+
 CORNER_MIN_HOLD  = 0.28   # s que nos quedamos en modo esquina como mínimo
 CORNER_MAX_HOLD  = 0.80   # s de seguridad para no quedarnos atrapados
 CORNER_PIVOT     = 11      # % base para pivot
@@ -79,7 +84,6 @@ S_ALPHA = 0.35   # suaviza mando de giro
 
 # --- Nuevos (añade estos) ---
 CORNER_FWD_MIN     = 12          # ambas ruedas ≥ este % en esquina
-CENTER_ON_LINE_TH  = 0.60        # C ≤ esto cuenta como “ya tomé línea”
 CORNER_COOLDOWN    = 0.18        # tras salir de esquina, ignora nueva esquina
 
 line_lost_deb_timer = 0.0
@@ -299,7 +303,7 @@ try:
             # por defecto (por si no hay rama), inicializa salidas “neutras”
             pos = 0.0; err = 0.0; derr = 0.0; steer = 0.0; base = BASE_MIN
             cmdL_target = 0.0; cmdR_target = 0.0
-            C_HOOK = 0.18   # sube a 0.18 si tu línea es más gris
+            
             # ---------- NUEVO BLOQUE DE COOLDOWN ----------
             if corner_cool > 0.0:
                 # En enfriamiento: NO detectes esquina nueva
@@ -335,7 +339,7 @@ try:
                 last_seen_dir = corner_side
                 state = STATE_CORNER
                 corner_hold = 0.0
-            elif line_lost:
+            elif line_lost and (wL + wC + wR) <= LINE_LOST_SUMW:
                 state = STATE_SEARCH
             # ---------- CONTROL PD SOLO SI SIGUES EN NORMAL ----------
         if state == STATE_NORMAL:
@@ -498,6 +502,6 @@ except KeyboardInterrupt:
 finally:
     lm.stop(); rm.stop()
     leds.all_off()
-    snd.play_file("ackonwledged-hq.wav")
+    snd.speak("Ackonwledged H.Q.")
     f.close()
     print("CSV:", csv_path)

@@ -39,7 +39,8 @@ wait_press_release()
 
 # ---------- CSV ----------
 os.makedirs("/home/robot/logs", exist_ok=True)
-path = f"/home/robot/logs/line_simple_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+path = "/home/robot/logs/line_simple_{0}.csv".format(time.strftime("%Y%m%d_%H%M%S"))
+
 f = open(path, "w", newline="")
 writer = csv.writer(f)
 writer.writerow(["t","L","C","R","cmdL","cmdR","label"])
