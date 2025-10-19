@@ -25,7 +25,7 @@ print("Coloca sobre BLANCO y pulsa...")
 wait_press_release()
 whiteL, whiteC, whiteR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
 
-print("Ahora sobre NEGRO (línea) y pulsa...")
+print("Ahora sobre NEGRO y pulsa...")
 wait_press_release()
 blackL, blackC, blackR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
 

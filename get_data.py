@@ -19,6 +19,11 @@ csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
 snd = Sound(); leds = Leds()
 
+BLIND_SUMW        = 0.20   # si wL+wR < esto, casi no hay línea en los lados
+BLIND_C_TH        = 0.65   # C claro (ajústalo si tu fondo es gris)
+BLIND_MIN_STEER   = 16.0   # diferencia mínima entre ruedas cuando estás “ciego”
+STEER_ZERO_TH     = 0.5    # umbral para anular steer (antes 1.5)
+
 # SEARCH sin reversa
 SEARCH_FWD_MIN  = 10   # si patina, 12
 SEARCH_TURN     = 5    # era 6
@@ -372,6 +377,17 @@ try:
             if abs(steer) < 1.5:
                 steer = 0.0
 
+            # --- Anti-recta en blanco ("blind steer") ---
+            if (wL + wR) < BLIND_SUMW and C >= BLIND_C_TH:
+                side = last_seen_dir if last_seen_dir != 0 else +1
+                # obliga un giro mínimo claro (cmdR - cmdL = steer)
+                steer = side * BLIND_MIN_STEER
+                # baja un poco la base para que el giro mande
+                base  = max(BASE_MIN, base - 2)
+
+            if abs(steer) < STEER_ZERO_TH:
+                steer = 0.0
+                
             cmdL_target = base - steer/2.0
             cmdR_target = base + steer/2.0
 

@@ -52,7 +52,7 @@ def calibrate_lr():
     wait_press_release(touch)
     wL = avg(csL); wR = avg(csR)
 
-    print("Pon AMBOS sensores en NEGRO (línea) y presiona el touch...")
+    print("Pon AMBOS sensores en NEGRO y presiona el touch...")
     wait_press_release(touch)
     bL = avg(csL); bR = avg(csR)
 
