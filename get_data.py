@@ -32,8 +32,8 @@ SEARCH_FWD_MIN   = 9     # antes 10-12 → menos proyección recta
 SEARCH_TURN      = 7     # era 5 → más giro
 SEARCH_BUMP_FWD  = 13    # era 14
 SEARCH_TIMEOUT   = 0.55  # era 0.60
-SEARCH_KICK_T    = 0.25  # NUEVO: primeros 0.25s, giro fuerte
-SEARCH_KICK_TURN = 11    # NUEVO: giro fuerte al inicio
+SEARCH_KICK_TURN = 12
+SEARCH_KICK_T    = 0.30
 SEARCH_BIAS      = 2.0   # NUEVO: asimetría extra de avance al lado elegido
 
 # Línea perdida robusta
@@ -42,8 +42,8 @@ CLEAR_TH       = 0.56      # antes 0.68
 CLEAR_TH_HI    = 0.58   # antes 0.60 (o 0.62 si aún cae de más)
 CLEAR_TH_LO    = 0.52   # zona de salida de "todo blanco"
 LINE_LOST_DEB  = 0.28   # antes 0.22 → más filtro
-REACQ_W        = 0.18   # antes 0.12 → re-adquiere antes
-CENTER_ON_LINE_TH = 0.45  # antes 0.55 → exige negro más claro en el centro
+REACQ_W = 0.22
+CENTER_ON_LINE_TH = 0.40
 # --------- Parámetros ----------
 # Velocidad adaptativa: base cae cuando el error es grande
 BASE_MAX = 26      # % en rectas
@@ -62,8 +62,8 @@ MOTOR_GAIN   = 1.00
 MAX_DELTA    = 4.0 # rampa real (ANTES 60 → demasiado alto)
 
 # Esquina aguda (dos sensores negros)
-HARD_DEEP     = 0.30    # antes 0.26
-HARD_CLEAR    = 0.70    # antes 0.62
+HARD_DEEP     = 0.35    # antes 0.30  → detecta negro "duro" un poco antes
+HARD_CLEAR    = 0.75    # antes 0.70  → exige blanco más claro del lado opuesto
 HARD_MIN_HOLD = 0.40    # 0.40–0.45
 HARD_ARC_FWD   = 14        # % avance en el arco duro
 HARD_ARC_DIFF  = 20       # % diferencial para “morder” el giro duro
@@ -81,7 +81,7 @@ SEARCH_SPEED   = 11
 C_HOOK        = 0.15    # 0.12–0.18; si el centro es más gris, súbelo
 CORNER_DEEP   = 0.20    # antes 0.18
 CORNER_CLEAR  = 0.82    # antes 0.78
-CORNER_DEBOUNCE = 0.10  # antes 0.08
+CORNER_DEBOUNCE = 0.08   # antes 0.10
 
 
 CORNER_MIN_HOLD  = 0.28   # s que nos quedamos en modo esquina como mínimo
@@ -98,6 +98,10 @@ S_ALPHA = 0.35   # suaviza mando de giro
 # --- Nuevos (añade estos) ---
 CORNER_FWD_MIN     = 12          # ambas ruedas ≥ este % en esquina
 CORNER_COOLDOWN    = 0.18        # tras salir de esquina, ignora nueva esquina
+
+STEER_SAT_TH    = TURN_CLAMP * 0.80  # umbral de saturación (~80% del tope)
+STEER_SAT_TIME  = 0.12               # mantenerlo así por ≥120 ms
+C_BRIGHT_FOR_CORNER = 0.60           # centro lo bastante claro
 
 line_lost_deb_timer = 0.0
 # --------- Utils ----------
@@ -199,6 +203,7 @@ state = STATE_NORMAL
 corner_deb = 0.0    # acumula tiempo de condición de esquina
 corner_hold = 0.0   # tiempo dentro del estado esquina (latch)
 corner_side = 0     # -1 izquierda, +1 derecha
+steer_sat_t = 0.0
 
 # header
 writer.writerow(["t","L","C","R","pos","err","derr","steer","base","cmdL","cmdR","state"])
@@ -392,6 +397,7 @@ try:
             except NameError:
                 pass
             steer_prev = steer
+            steer_pd = steer  # <-- guarda el steer del PD AQUÍ, antes del blind
 
             if abs(steer) < 1.5:
                 steer = 0.0
@@ -413,6 +419,22 @@ try:
             # anulación de giros mínimos (más permisiva)
             if abs(steer) < STEER_ZERO_TH:
                 steer = 0.0
+
+            # ---- Latch de esquina por steer saturado ----
+            if abs(steer_pd) >= STEER_SAT_TH and C >= C_BRIGHT_FOR_CORNER:
+                steer_sat_t += DT
+            else:
+                steer_sat_t = 0.0
+
+            if steer_sat_t >= STEER_SAT_TIME:
+                corner_side = +1 if steer > 0 else -1
+                last_seen_dir = corner_side
+                state = STATE_CORNER
+                corner_hold = 0.0
+                corner_is_hard = True   # trátala como "dura" para morder fuerte
+                steer_sat_t = 0.0
+                continue
+                # evita que este ciclo siga armando cmdL/cmdR como NORMAL
 
             cmdL_target = base - steer/2.0
             cmdR_target = base + steer/2.0
@@ -458,6 +480,7 @@ try:
                 # (opcional) recuerda el último lado visto:
                 last_seen_dir = side
                 corner_is_hard = False
+                corner_cool = CORNER_COOLDOWN   # <-- ACTIVA el cooldown de verdad
 
         elif state == STATE_SEARCH:
             side = last_seen_dir if last_seen_dir != 0 else +1
