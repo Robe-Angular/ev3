@@ -57,7 +57,7 @@ BOOST = 28         # pulso fuerte en curva cerrada
 SEARCH_SLOW = 10   # velocidad en búsqueda
 DT    = 0.02       # ciclo (s)
 
-FOLLOW_LEFT = True     # True: sigue borde izquierdo | False: derecho
+FOLLOW_LEFT = False     # True: sigue borde izquierdo | False: derecho
 last_side = -1 if FOLLOW_LEFT else 1   # -1=izq, +1=der
 sawL = sawC = sawR = False
 t0 = time.time()
