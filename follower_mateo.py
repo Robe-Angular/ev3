@@ -48,8 +48,19 @@ def avg(sensor, n=10, d=0.01):
         time.sleep(d)
     return s/float(n)
 
+# --- Ramp/Clamp ---
 def clamp(x, lo, hi):
     return lo if x < lo else (hi if x > hi else x)
+
+MAX_DELTA = 6.0   # puntos % por ciclo (4..8)
+
+_prevL = 0.0
+_prevR = 0.0
+def _slew(prev_cmd, target_cmd, max_delta=MAX_DELTA):
+    if target_cmd > prev_cmd + max_delta: return prev_cmd + max_delta
+    if target_cmd < prev_cmd - max_delta: return prev_cmd - max_delta
+    return target_cmd
+
 
 def norm(v, lo, hi):
     d = float(hi - lo)
@@ -96,23 +107,24 @@ calibL, calibC, calibR, CLEAR_HI, CLEAR_LO, CENTER_ON_LINE = calibrate()
 
 # ---------------- Params (smart/simple) ----------------
 # P follower
-# --- Params más ágiles ---
-KP         = 60.0     # más nervioso para curvas
-TURN_CLAMP = 50.0
-BASE_MAX   = 45.0     # antes 24
-BASE_MIN   = 20.0     # antes 12
-K_SPEED    = 18.0     # cae menos la base
+# ---------------- Params (smart/simple) ----------------
+TURN_SIGN  = +1   # si gira al revés, pon -1
+KP         = 48.0
+TURN_CLAMP = 38.0
+BASE_MAX   = 38.0
+BASE_MIN   = 16.0
+K_SPEED    = 22.0
 
 # Blind steer (cuando centro claro y lados muy blancos)
 BLIND_SUMW  = 0.14
 BLIND_C_TH  = 0.65
-BLIND_STEER = 12.0
-BLIND_DROP  = 4.0
+BLIND_STEER = 10.0
+BLIND_DROP  = 5.0
 
 # Search (sin reversa)
-SEARCH_FWD  = 22.0
-SEARCH_TURN = 16.0
-SEARCH_SIDE_SWITCH = 1.0
+SEARCH_FWD  = 18.0
+SEARCH_TURN = 12.0
+SEARCH_SIDE_SWITCH = 0.9
 
 
 # Debounce / cooldown
@@ -134,9 +146,14 @@ def motors_from_steer(base, steer):
     return cmdL, cmdR
 
 def set_motors(cmdL, cmdR):
-    # cmdL/cmdR en porcentaje 0..100
-    lm.on(SpeedPercent(int(clamp(cmdL, -100, 100))))
-    rm.on(SpeedPercent(int(clamp(cmdR, -100, 100))))
+    # cmd en -100..100
+    global _prevL, _prevR
+    cmdL = clamp(cmdL, -100, 100)
+    cmdR = clamp(cmdR, -100, 100)
+    cmdL = _slew(_prevL, cmdL); _prevL = cmdL
+    cmdR = _slew(_prevR, cmdR); _prevR = cmdR
+    lm.on(SpeedPercent(int(cmdL)))
+    rm.on(SpeedPercent(int(cmdR)))
 
 # ---------------- Main loop ----------------
 snd.speak("Ready. Press button to start.")
@@ -185,7 +202,7 @@ try:
             base = clamp(BASE_MAX - K_SPEED*abs(pos), BASE_MIN, BASE_MAX)
 
             # Proportional steer
-            steer = clamp(KP * pos, -TURN_CLAMP, TURN_CLAMP)
+            steer = clamp(TURN_SIGN * KP * pos, -TURN_CLAMP, TURN_CLAMP)
 
             # Blind steer: center very clear and sides very clear
             if (wL + wR) < BLIND_SUMW and C >= BLIND_C_TH:
