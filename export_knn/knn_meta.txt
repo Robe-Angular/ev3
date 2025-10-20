@@ -1,0 +1,4 @@
+K=1
+DIST=cityblock
+USE_PROTOTYPES=1
+USE_ZSCORE=0
