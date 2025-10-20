@@ -71,6 +71,10 @@ try:
         rm.on(SpeedPercent(cmdR))
 
         print(label, L, C, R)
+
+        if touch.is_pressed:
+            print("Touch presionado: saliendo.")
+            break
         time.sleep(0.05)
 
 except KeyboardInterrupt:
