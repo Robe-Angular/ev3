@@ -41,14 +41,14 @@ print("BLANCOS:", whiteL, whiteC, whiteR)
 print("NEGROS :", blackL, blackC, blackR)
 
 # --- Crear y configurar el modelo ---
-perceptron = PerceptronPortable("./export_perc", k=5, dist="euclidean", mode="calib")
+perceptron = PerceptronPortable("./export_perc", mode="calib")
 perceptron.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
-# --- Mapeo de clases a velocidades ---
+FWD, TURN = 5, 15
 map_cmd = {
-    "LEFT":   (-18, +18),
-    "CENTER": (+18, +18),
-    "RIGHT":  (+18, -18)
+    "LEFT":   (FWD - TURN, FWD + TURN),
+    "CENTER": (FWD,        FWD),
+    "RIGHT":  (FWD + TURN, FWD - TURN),
 }
 
 print("Listo! Presiona para comenzar...")
