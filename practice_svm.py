@@ -45,8 +45,8 @@ svm = SVMPortable("./export_svm", mode="calib")
 svm.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # --- Mapeo de clases a velocidades ---
-FWD = 10    # empuje hacia adelante
-TURN = 12   # componente de giro
+FWD = 5    # empuje hacia adelante
+TURN = 20   # componente de giro
 
 map_cmd = {
     "LEFT":   (FWD - TURN, FWD + TURN),   # = ( -2, 22 )  aprox
@@ -70,7 +70,7 @@ try:
         lm.on(SpeedPercent(cmdL))
         rm.on(SpeedPercent(cmdR))
 
-        print(label, L, C, R)
+        
 
         if touch.is_pressed:
             print("Touch presionado: saliendo.")

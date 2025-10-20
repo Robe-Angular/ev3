@@ -45,12 +45,12 @@ knn = KNNPortable("./export_knn", k=5, dist="euclidean", mode="calib")
 knn.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # --- Mapeo de clases a velocidades ---
+FWD, TURN = 5, 20
 map_cmd = {
-    "LEFT":   (-18, +18),
-    "CENTER": (+18, +18),
-    "RIGHT":  (+18, -18)
+    "LEFT":   (FWD - TURN, FWD + TURN),
+    "CENTER": (FWD,        FWD),
+    "RIGHT":  (FWD + TURN, FWD - TURN),
 }
-
 print("Listo! Presiona para comenzar...")
 wait_press_release()
 

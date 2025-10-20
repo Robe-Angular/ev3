@@ -30,7 +30,7 @@ logr = LogisticPortable("./export_logreg", mode="calib")
 logr.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # Motion map (always include forward to avoid spinning in place)
-FWD, TURN = 10, 12
+FWD, TURN = 5, 20
 map_cmd = {
     "LEFT":   (FWD - TURN, FWD + TURN),
     "CENTER": (FWD,        FWD),
@@ -62,12 +62,6 @@ try:
 
         cmdL, cmdR = map_cmd.get(last_label, (FWD, FWD))
         lm.on(SpeedPercent(cmdL)); rm.on(SpeedPercent(cmdR))
-
-        now = time.time()
-        if now - last_log >= LOG_EVERY:
-            sys.stdout.write("{} {} {} {}\n".format(last_label, L, C, R))
-            sys.stdout.flush()
-            last_log = now
 
         if touch.is_pressed:  # touch to stop
             break

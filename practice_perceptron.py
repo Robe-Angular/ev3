@@ -44,7 +44,7 @@ print("NEGROS :", blackL, blackC, blackR)
 perceptron = PerceptronPortable("./export_perc", mode="calib")
 perceptron.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
-FWD, TURN = 5, 15
+FWD, TURN = 5, 20
 map_cmd = {
     "LEFT":   (FWD - TURN, FWD + TURN),
     "CENTER": (FWD,        FWD),
@@ -67,7 +67,7 @@ try:
         lm.on(SpeedPercent(cmdL))
         rm.on(SpeedPercent(cmdR))
 
-        print(label, L, C, R)
+        
         time.sleep(0.05)
 
 except KeyboardInterrupt:
