@@ -1,4 +1,4 @@
-epochs=15
+epochs=50
 batch=64
 lr0=0.1
 lambda=0.001
