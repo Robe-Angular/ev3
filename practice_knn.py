@@ -25,13 +25,13 @@ def wait_press_release():
         time.sleep(0.01)
 
 # --- Calibración ---
-print("Coloca los sensores sobre BLANCO y presiona el botón...")
+print("Coloca los sensores sobre BLANCO y presiona el b...")
 wait_press_release()
 whiteL = csL.reflected_light_intensity
 whiteC = csC.reflected_light_intensity
 whiteR = csR.reflected_light_intensity
 
-print("Ahora sobre NEGRO y presiona el botón...")
+print("Ahora sobre NEGRO y presiona el b...")
 wait_press_release()
 blackL = csL.reflected_light_intensity
 blackC = csC.reflected_light_intensity
@@ -51,7 +51,7 @@ map_cmd = {
     "RIGHT":  (+18, -18)
 }
 
-print("Listo! Presiona el botón para comenzar...")
+print("Listo! Presiona para comenzar...")
 wait_press_release()
 
 # --- Loop principal ---
