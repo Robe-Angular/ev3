@@ -25,7 +25,7 @@ class KNNPortable:
 
         for f in (fx, fy, fcls):
             if not os.path.exists(f):
-                raise FileNotFoundError(f"Falta: {f}")
+                raise IOError("Falta: {}".format(f))
 
         self.X = self._read_matrix(fx)     # prototipos/ejemplos ya en el mismo espacio que predict()
         self.y = self._read_vector(fy)
@@ -37,7 +37,9 @@ class KNNPortable:
             fsig = os.path.join(model_dir, "knn_sigma.csv")
             for f in (fmu, fsig):
                 if not os.path.exists(f):
-                    raise FileNotFoundError(f"Falta: {f} (requerido para mode='zscore')")
+                    raise IOError("Falta: {} (requerido para mode='zscore')".format(f))
+
+
             self.mu = self._read_vector(fmu)
             self.sigma = [ (s if abs(s) > 1e-9 else 1.0) for s in self._read_vector(fsig)]
             if len(self.mu) != len(self.X[0]):
