@@ -45,10 +45,13 @@ svm = SVMPortable("./export_svm", mode="calib")
 svm.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # --- Mapeo de clases a velocidades ---
+FWD = 10    # empuje hacia adelante
+TURN = 12   # componente de giro
+
 map_cmd = {
-    "LEFT":   (-18, +18),
-    "CENTER": (+18, +18),
-    "RIGHT":  (+18, -18)
+    "LEFT":   (FWD - TURN, FWD + TURN),   # = ( -2, 22 )  aprox
+    "CENTER": (FWD,        FWD),          # = ( 10, 10 )
+    "RIGHT":  (FWD + TURN, FWD - TURN),   # = ( 22, -2 )
 }
 
 print("Listo! Presiona para comenzar...")
