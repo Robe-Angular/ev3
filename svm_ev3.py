@@ -35,7 +35,7 @@ class SVMPortable:
             raise ValueError("svm_W.csv vacío")
         D = len(self.W[0])
         if len(self.b) != len(self.W):
-            raise ValueError("Dimensión b no coincide con W")
+            raise ValueError("Dimension b no coincide con W")
         self.D = D
 
     def set_calibration(self, whiteL, whiteC, whiteR, blackL, blackC, blackR):
@@ -89,7 +89,7 @@ class SVMPortable:
 
     def predict(self, L=None, C=None, R=None):
         if self.mode != "calib":
-            raise ValueError("Sólo mode='calib' soportado en EV3 para SVM.")
+            raise ValueError("Slo mode='calib' soportado en EV3 para SVM.")
         if L is None or C is None or R is None:
             raise ValueError("Pasa L,C,R crudos")
         x = self._features_from_raw(L, C, R)  # 6D
