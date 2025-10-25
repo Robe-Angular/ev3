@@ -1,12 +1,24 @@
 from ev3dev2.motor import MediumMotor, OUTPUT_A
+from ev3dev2.button import Button
 from time import sleep
 
+# Configura motor y botones
 garra = MediumMotor(OUTPUT_A)
+btn = Button()
 
-# Cerrar la garra
-garra.on_for_degrees(speed=60, degrees=90)
-sleep(1)
+print("Listo bro! Usa ↓ para cerrar, ↑ para abrir, y el centro para salir.")
 
-# Abrir la garra
-garra.on_for_degrees(speed=-60, degrees=90)
-sleep(1)
+while True:
+    if btn.down:     # Flecha abajo → cerrar
+        print("Cerrando garra...")
+        garra.on_for_degrees(speed=30, degrees=60)
+        sleep(0.3)
+    elif btn.up:     # Flecha arriba → abrir
+        print("Abriendo garra...")
+        garra.on_for_degrees(speed=-30, degrees=60)
+        sleep(0.3)
+    elif btn.enter:  # Botón central → salir
+        print("Saliendo del programa bro...")
+        garra.stop()
+        break
+    sleep(0.1)
