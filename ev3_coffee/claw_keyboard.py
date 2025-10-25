@@ -10,7 +10,7 @@ STEP_DEG = 60
 SPEED = 30
 
 print("Keyboard control ready:")
-print("a = close | z = open | q = quit")
+print("a = close, z = open, q = quit")
 
 # setup terminal for raw key reading
 fd = sys.stdin.fileno()
