@@ -6,7 +6,7 @@ from time import sleep
 garra = MediumMotor(OUTPUT_A)
 btn = Button()
 
-print("Listo bro! Usa ↓ para cerrar, ↑ para abrir, y el centro para salir.")
+print("Usa los botones del ev3")
 
 while True:
     if btn.down:     # Flecha abajo → cerrar
