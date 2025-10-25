@@ -1,18 +1,17 @@
 # file: claw_load_logger.py
-# ev3dev2: log motor load while testing the claw
+# ev3dev2: log motor load while testing the claw (ascii only)
 
 from ev3dev2.motor import MediumMotor, OUTPUT_A
 from ev3dev2.button import Button
 from ev3dev2.power import PowerSupply
 from time import sleep, time
 
-# config
 PORT = OUTPUT_A
-STEP_DEG = 60           # move per button tap (up/down)
-SPEED = 30              # speed percent
-SAMPLE_DT = 0.05        # seconds between samples
-STALL_SPEED = 5         # tacho speed close to zero
-STALL_DUTY = 85         # pwm duty high -> motor pushing hard
+STEP_DEG = 60
+SPEED = 30
+SAMPLE_DT = 0.05
+STALL_SPEED = 5
+STALL_DUTY = 85
 LOG_PATH = "/home/robot/garra_log.csv"
 
 m = MediumMotor(PORT)
@@ -20,11 +19,11 @@ btn = Button()
 ps = PowerSupply()
 
 def log_header():
-    with open(LOG_PATH, "w") as f:
-        f.write("time_s,action,position,speed,duty,voltage,current\n")
+    f = open(LOG_PATH, "w")
+    f.write("time_s,action,position,speed,duty,voltage,current\n")
+    f.close()
 
 def log_line(action):
-    # voltage_now in mV, current_now in mA
     try:
         v = ps.measured_volts
     except:
@@ -34,16 +33,15 @@ def log_line(action):
     except:
         c = 0.0
     t = time()
-    line = f"{t:.3f},{action},{m.position},{m.speed},{m.duty_cycle},{v:.3f},{c:.3f}\n"
-    with open(LOG_PATH, "a") as f:
-        f.write(line)
+    line = "%.3f,%s,%d,%d,%d,%.3f,%.3f\n" % (t, action, m.position, m.speed, m.duty_cycle, v, c)
+    f = open(LOG_PATH, "a")
+    f.write(line)
+    f.close()
 
 def sample_while_running(action_label):
-    # sample motor telemetry until it stops running
     while "running" in m.state:
         log_line(action_label)
         sleep(SAMPLE_DT)
-    # one last sample after stop
     log_line(action_label + "_end")
 
 def move_rel_logged(deg, label):
@@ -51,9 +49,7 @@ def move_rel_logged(deg, label):
     sample_while_running(label)
 
 def run_until_stall(direction, label):
-    # direction: +1 close, -1 open
     m.on(direction * SPEED)
-    # sample until stall
     stall_count = 0
     while True:
         log_line(label)
@@ -63,9 +59,8 @@ def run_until_stall(direction, label):
             stall_count += 1
         else:
             stall_count = 0
-        if stall_count >= 5:   # ~5 samples -> ~0.25 s stable stall
+        if stall_count >= 5:
             break
-        # allow user to abort with center button
         if btn.enter:
             break
         sleep(SAMPLE_DT)
