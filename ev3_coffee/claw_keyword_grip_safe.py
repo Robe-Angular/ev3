@@ -10,11 +10,13 @@ import sys, termios, tty, signal
 PORT = OUTPUT_A
 SPEED = 20
 SAMPLE_DT = 0.05
+BASELINE_TIME = 0.4   # seconds for baseline
+DELTA_DUTY = 10       # duty rise above baseline to call grip
+
 STEP_DEG = 40
-SAMPLE_DT = 0.05
 STALL_SPEED = 30
 STALL_DUTY = 45
-HIT_COUNT = 6
+HIT_COUNT = 5
 LOG_PATH = "/home/robot/claw_grip_log.csv"
 # position freeze detector
 POS_EPS = 2         # deg: position change considered "stopped"
@@ -30,6 +32,8 @@ def stop_all(sig=None, frame=None):
     sys.exit(0)
 
 signal.signal(signal.SIGINT, stop_all)
+
+DELTA_DUTY = 10       # duty rise above baseline to call grip
 
 def log_header():
     f = open(LOG_PATH, "w")
@@ -54,31 +58,54 @@ def sample_loop(label, until_cond=None):
     log_line(label + "_end")
 
 def close_until_grip():
-    print("closing until grip...")
-    m.on(-SPEED)  # invert direction so it closes correctly
+    print("calibrating baseline...")
+    base = measure_baseline()
+    thresh = base + DELTA_DUTY
+    if thresh < 35:
+        thresh = 35  # floor to avoid too low thresholds
+
+    print("closing until grip... base=%.1f, thresh=%.1f" % (base, thresh))
+    m.on(-SPEED)
+
     hits = 0
     pos_hits = 0
     last_pos = m.position
+
     def cond():
         nonlocal hits, pos_hits, last_pos
-        spd = abs(m.speed)
         dty = abs(m.duty_cycle)
-        if spd < STALL_SPEED and dty > STALL_DUTY:
+        spd = abs(m.speed)
+        pos = m.position
+
+        # duty rise heuristic
+        if dty >= thresh:
             hits += 1
         else:
             hits = 0
-        return hits >= HIT_COUNT
-    
-    sample_loop("close_hold", cond)
+
+        # position freeze heuristic (very small motion)
+        if abs(pos - last_pos) <= POS_EPS:
+            pos_hits += 1
+        else:
+            pos_hits = 0
+        last_pos = pos
+
+        return (hits >= HIT_COUNT) or (pos_hits >= POS_HITS)
+
+    # sample and wait for condition or stop
+    while "running" in m.state:
+        log_line("close_hold")
+        if cond():
+            break
+        sleep(SAMPLE_DT)
+
     m.stop()
     log_line("close_hold_stop")
-
-
     if hits >= HIT_COUNT or pos_hits >= POS_HITS:
         print("grip detected")
     else:
-        print("stopped")
-
+        print("stopped (no grip)")
+        
 def open_short():
     print("opening step")
     m.on_for_degrees(speed=SPEED, degrees=STEP_DEG)
