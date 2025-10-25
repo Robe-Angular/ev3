@@ -8,13 +8,17 @@ import sys, termios, tty, signal
 
 # config
 PORT = OUTPUT_A
-SPEED = 30
+SPEED = 20
+SAMPLE_DT = 0.05
 STEP_DEG = 40
 SAMPLE_DT = 0.05
-STALL_SPEED = 5
-STALL_DUTY = 80
+STALL_SPEED = 30
+STALL_DUTY = 45
 HIT_COUNT = 6
 LOG_PATH = "/home/robot/claw_grip_log.csv"
+# position freeze detector
+POS_EPS = 2         # deg: position change considered "stopped"
+POS_HITS = 5        # samples in a row with tiny motion
 
 m = MediumMotor(PORT)
 ps = PowerSupply()
@@ -53,8 +57,10 @@ def close_until_grip():
     print("closing until grip...")
     m.on(-SPEED)  # invert direction so it closes correctly
     hits = 0
+    pos_hits = 0
+    last_pos = m.position
     def cond():
-        nonlocal hits
+        nonlocal hits, pos_hits, last_pos
         spd = abs(m.speed)
         dty = abs(m.duty_cycle)
         if spd < STALL_SPEED and dty > STALL_DUTY:
@@ -62,10 +68,13 @@ def close_until_grip():
         else:
             hits = 0
         return hits >= HIT_COUNT
+    
     sample_loop("close_hold", cond)
     m.stop()
     log_line("close_hold_stop")
-    if hits >= HIT_COUNT:
+
+
+    if hits >= HIT_COUNT or pos_hits >= POS_HITS:
         print("grip detected")
     else:
         print("stopped")
