@@ -1,0 +1,12 @@
+from ev3dev2.motor import MediumMotor, OUTPUT_A
+from time import sleep
+
+garra = MediumMotor(OUTPUT_A)
+
+# Cerrar la garra
+garra.on_for_degrees(speed=30, degrees=90)
+sleep(1)
+
+# Abrir la garra
+garra.on_for_degrees(speed=-30, degrees=90)
+sleep(1)

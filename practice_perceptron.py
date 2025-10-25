@@ -76,3 +76,10 @@ finally:
     lm.stop()
     rm.stop()
     print("Detenido.")
+
+# FWD, TURN = 5, 20
+# map_cmd = {
+#     "LEFT":   (FWD - TURN, FWD + TURN),
+#     "CENTER": (FWD,        FWD),
+#     "RIGHT":  (FWD + TURN, FWD - TURN),
+# }

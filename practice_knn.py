@@ -67,7 +67,6 @@ try:
         lm.on(SpeedPercent(cmdL))
         rm.on(SpeedPercent(cmdR))
 
-        print(label, L, C, R)
         time.sleep(0.05)
 
 except KeyboardInterrupt:
