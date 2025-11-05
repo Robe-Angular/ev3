@@ -12,10 +12,13 @@ rm = LargeMotor(OUTPUT_C)
 lm.stop_action = 'brake'
 rm.stop_action = 'brake'
 
+OPPOSITE_LOCK_MS = 700   # antes 350
+CENTER_GATE_MS   = 150   # tiempo mínimo con C oscuro para permitir cambio de carril
+CORNER_PIVOT_MS  = 180   # tiempo que mantiene el pivot en esquina
+REV_INNER        = 16    # más reversa en rueda interna
+MIN_BASE_CORNER  = 6     # menor base en la esquina
+
 TIGHT_K = 8 
-MIN_BASE_CORNER = 8
-REV_INNER = 10
-OPPOSITE_LOCK_MS = 350
 
 side_lock_until = 0.0  # (state) tiempo hasta el que ignoramos el lado opuesto
 now = lambda: time.time()
@@ -87,6 +90,22 @@ sawL = sawC = sawR = False
 t0 = time.time()
 t_both_dark = 0.0
 t_lost = None
+center_dark_since = None
+corner_until = 0.0
+# --- Filtros de lock/puerta central ---
+# 2.1 Si hay lock, ignora el lado opuesto
+if not FOLLOW_LEFT and now() < side_lock_until:
+    sawL = False
+if  FOLLOW_LEFT and now() < side_lock_until:
+    sawR = False
+
+# 2.2 Puerta central: exige C oscuro un rato para permitir cambio de carril
+if sawC:
+    if center_dark_since is None:
+        center_dark_since = now()
+else:
+    center_dark_since = None
+
 
 # Rampa: baja base cuando el giro es grande
 def with_turn_ramp(base, turn):
@@ -105,17 +124,27 @@ try:
         # Booleans con histeresis
         if not sawL: sawL = (L < thL_on)
         else:        sawL = (L < thL_off)
-
         if not sawC: sawC = (C < thC_on)
         else:        sawC = (C < thC_off)
-
         if not sawR: sawR = (R < thR_on)
         else:        sawR = (R < thR_off)
 
         state = "RUN"
         cmdL = cmdR = BASE
-
         line_detected = sawL or sawC or sawR
+
+        # --- Filtros de lock/puerta central ---
+        # 1) Si hay lock, ignora lado opuesto
+        if not FOLLOW_LEFT and now() < side_lock_until:
+            sawL = False
+        if  FOLLOW_LEFT and now() < side_lock_until:
+            sawR = False
+        # 2) Puerta central: requiere C oscuro un ratito para permitir cambio de carril
+        if sawC:
+            if center_dark_since is None:
+                center_dark_since = now()
+        else:
+            center_dark_since = None
 
         # Memoriza último lado visto (prioriza borde elegido)
         if FOLLOW_LEFT:
@@ -123,14 +152,16 @@ try:
                 last_side = -1
             elif sawC:
                 pass
-            elif sawR and now() > side_lock_until:   # ignora lado opuesto durante lock
+            elif sawR and (now() > side_lock_until) and (center_dark_since is not None) \
+                 and (now() - center_dark_since >= CENTER_GATE_MS/1000.0):
                 last_side = 1
         else:
             if sawR:
                 last_side = 1
             elif sawC:
                 pass
-            elif sawL and now() > side_lock_until:   # ignora lado opuesto durante lock
+            elif sawL and (now() > side_lock_until) and (center_dark_since is not None) \
+                 and (now() - center_dark_since >= CENTER_GATE_MS/1000.0):
                 last_side = -1
 
         # ¿Curva/cruceta? (dos sensores ven negro)
@@ -159,26 +190,29 @@ try:
                     cmdR = clamp(base_now + turn)
                     state = "EDGE_L"
                 elif sawC:
-                    cmdL = BASE; cmdR = BASE
-                    state = "CENTER"
+                    cmdL = BASE; cmdR = BASE; state = "CENTER"
                 elif sawR:
                     base_now = with_turn_ramp(BASE, TURN//2)
                     cmdL = clamp(base_now - TURN//2)
                     cmdR = clamp(base_now + TURN//2)
                     state = "RECOVER_L"
-
             else:
                 # ======= Borde derecho =======
-                if sawR:
-                    # --- ESQUINA CERRADA DERECHO ---
+                # Hold de pivot si venimos de esquina
+                if now() < corner_until:
+                    cmdL = clamp(MIN_BASE_CORNER + BOOST)
+                    cmdR = clamp(-REV_INNER)
+                    state = "CORNER_R_HOLD"
+                elif sawR:
+                    # Esquina cerrada
                     if (not sawC) and (R < thR - TIGHT_K):
-                        side_lock_until = now() + OPPOSITE_LOCK_MS/1000.0  # bloquea lado opuesto un rato
-                        # Pivot controlado: rueda externa (L) acelera, interna (R) frena/retrocede
-                        cmdL = clamp(MIN_BASE_CORNER + BOOST)
-                        cmdR = clamp(-REV_INNER)
+                        side_lock_until = now() + OPPOSITE_LOCK_MS/1000.0
+                        corner_until    = now() + CORNER_PIVOT_MS/1000.0
+                        cmdL = clamp(MIN_BASE_CORNER + BOOST)   # externa rápida
+                        cmdR = clamp(-REV_INNER)                 # interna en reversa
                         state = "CORNER_R"
                     else:
-                        # --- Control proporcional normal EDGE_R ---
+                        # Control proporcional normal
                         err  = max(0.0, (thR - R))
                         turn = clamp(int(kP * err), -BOOST, BOOST)
                         if (not sawC) and (R < thR - 6):
@@ -188,8 +222,7 @@ try:
                         cmdR = clamp(base_now - turn)
                         state = "EDGE_R"
                 elif sawC:
-                    cmdL = BASE; cmdR = BASE
-                    state = "CENTER"
+                    cmdL = BASE; cmdR = BASE; state = "CENTER"
                 elif sawL:
                     base_now = with_turn_ramp(BASE, TURN//2)
                     cmdL = clamp(base_now + TURN//2)
@@ -199,7 +232,7 @@ try:
         else:
             # Línea perdida: busca hacia donde la viste por última vez
             state = "SEARCH"
-            if t_lost is None: 
+            if t_lost is None:
                 t_lost = time.time()
             lost_time = time.time() - t_lost
 
