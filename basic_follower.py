@@ -12,6 +12,14 @@ rm = LargeMotor(OUTPUT_C)
 lm.stop_action = 'brake'
 rm.stop_action = 'brake'
 
+TIGHT_K = 8 
+MIN_BASE_CORNER = 8
+REV_INNER = 10
+OPPOSITE_LOCK_MS = 350
+
+side_lock_until = 0.0  # (state) tiempo hasta el que ignoramos el lado opuesto
+now = lambda: time.time()
+
 csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
 csC = ColorSensor(INPUT_2); csC.mode = 'COL-REFLECT'
 csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
@@ -111,13 +119,19 @@ try:
 
         # Memoriza último lado visto (prioriza borde elegido)
         if FOLLOW_LEFT:
-            if sawL: last_side = -1
-            elif sawC: pass
-            elif sawR: last_side = 1
+            if sawL:
+                last_side = -1
+            elif sawC:
+                pass
+            elif sawR and now() > side_lock_until:   # ignora lado opuesto durante lock
+                last_side = 1
         else:
-            if sawR: last_side = 1
-            elif sawC: pass
-            elif sawL: last_side = -1
+            if sawR:
+                last_side = 1
+            elif sawC:
+                pass
+            elif sawL and now() > side_lock_until:   # ignora lado opuesto durante lock
+                last_side = -1
 
         # ¿Curva/cruceta? (dos sensores ven negro)
         if (sawL and sawR) or (sawL and sawC and not sawR) or (sawR and sawC and not sawL):
@@ -134,11 +148,10 @@ try:
             t_lost = None
 
             if FOLLOW_LEFT:
+                # ======= Borde izquierdo =======
                 if sawL:
-                    # Proporcional: cuanto más negro L, mayor giro
-                    err = max(0.0, (thL - L))
+                    err  = max(0.0, (thL - L))
                     turn = clamp(int(kP * err), -BOOST, BOOST)
-                    # Pulso en esquina
                     if (not sawC) and (L < thL - 6):
                         turn = clamp(BOOST, -BOOST, BOOST)
                     base_now = with_turn_ramp(BASE, turn)
@@ -153,16 +166,27 @@ try:
                     cmdL = clamp(base_now - TURN//2)
                     cmdR = clamp(base_now + TURN//2)
                     state = "RECOVER_L"
+
             else:
+                # ======= Borde derecho =======
                 if sawR:
-                    err = max(0.0, (thR - R))
-                    turn = clamp(int(kP * err), -BOOST, BOOST)
-                    if (not sawC) and (R < thR - 6):
-                        turn = clamp(BOOST, -BOOST, BOOST)
-                    base_now = with_turn_ramp(BASE, turn)
-                    cmdL = clamp(base_now + turn)
-                    cmdR = clamp(base_now - turn)
-                    state = "EDGE_R"
+                    # --- ESQUINA CERRADA DERECHO ---
+                    if (not sawC) and (R < thR - TIGHT_K):
+                        side_lock_until = now() + OPPOSITE_LOCK_MS/1000.0  # bloquea lado opuesto un rato
+                        # Pivot controlado: rueda externa (L) acelera, interna (R) frena/retrocede
+                        cmdL = clamp(MIN_BASE_CORNER + BOOST)
+                        cmdR = clamp(-REV_INNER)
+                        state = "CORNER_R"
+                    else:
+                        # --- Control proporcional normal EDGE_R ---
+                        err  = max(0.0, (thR - R))
+                        turn = clamp(int(kP * err), -BOOST, BOOST)
+                        if (not sawC) and (R < thR - 6):
+                            turn = clamp(BOOST, -BOOST, BOOST)
+                        base_now = with_turn_ramp(BASE, turn)
+                        cmdL = clamp(base_now + turn)
+                        cmdR = clamp(base_now - turn)
+                        state = "EDGE_R"
                 elif sawC:
                     cmdL = BASE; cmdR = BASE
                     state = "CENTER"
@@ -175,15 +199,25 @@ try:
         else:
             # Línea perdida: busca hacia donde la viste por última vez
             state = "SEARCH"
-            if t_lost is None: t_lost = time.time()
+            if t_lost is None: 
+                t_lost = time.time()
             lost_time = time.time() - t_lost
 
-            spin = SPIN  # <-- usa el SPIN escalado
+            spin = SPIN
             if last_side <= 0:
                 cmdL = -spin; cmdR =  spin
             else:
                 cmdL =  spin; cmdR = -spin
 
+            # Anti-salto si el lock sigue activo: mini-pivot hacia tu borde
+            if now() < side_lock_until:
+                mini = SPIN
+                if FOLLOW_LEFT:
+                    cmdL = -mini; cmdR = mini
+                else:
+                    cmdL = mini;  cmdR = -mini
+
+            # Peinado
             if lost_time > 0.8:
                 state = "SEARCH_FWD"
                 cmdL = SEARCH_SLOW
