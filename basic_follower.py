@@ -4,6 +4,7 @@
 from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C, SpeedPercent
 from ev3dev2.sensor.lego import ColorSensor, TouchSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
+from ev3dev2.sound import Sound
 import time, os, csv
 
 lm = LargeMotor(OUTPUT_B)
@@ -18,18 +19,21 @@ touch = TouchSensor(INPUT_4)
 # ✨ Arregla que "adelante" esté yendo "atrás"
 lm.polarity = 'inversed'
 rm.polarity = 'inversed'
-
+sound = Sound()
 # ---------- Calibración rápida ----------
 def wait_press_release():
     while not touch.is_pressed: time.sleep(0.01)
     while touch.is_pressed: time.sleep(0.01)
 
 print("Coloca sobre BLANCO y pulsa...")
+sound.speak("VelCom locked")   # Alistando robot
 wait_press_release()
 whiteL, whiteC, whiteR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
 
 print("Ahora sobre NEGRO y pulsa...")
+
 wait_press_release()
+sound.speak("Targets Designated")   #Alistando robot
 blackL, blackC, blackR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
 
 # Umbral base y márgenes de histeresis
@@ -44,7 +48,7 @@ thR_on, thR_off = thR + HYST, thR - HYST
 print("Umbrales:", round(thL,1), round(thC,1), round(thR,1))
 print("Pulsa otra vez para empezar.")
 wait_press_release()
-
+sound.speak("Go ahead Taccom")   #Alistando robot
 # ---------- CSV ----------
 os.makedirs("/home/robot/logs", exist_ok=True)
 path = "/home/robot/logs/line_edge_{0}.csv".format(time.strftime("%Y%m%d_%H%M%S"))
@@ -183,5 +187,6 @@ except KeyboardInterrupt:
     pass
 finally:
     lm.stop(); rm.stop()
+    sound.speak("Acknowledged HQ")   #Alistando robot
     f.close()
     print("CSV guardado:", path)
