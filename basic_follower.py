@@ -15,6 +15,9 @@ csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
 csC = ColorSensor(INPUT_2); csC.mode = 'COL-REFLECT'
 csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
+# ✨ Arregla que "adelante" esté yendo "atrás"
+lm.polarity = 'inversed'
+rm.polarity = 'inversed'
 
 # ---------- Calibración rápida ----------
 def wait_press_release():
