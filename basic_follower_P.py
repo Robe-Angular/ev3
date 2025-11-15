@@ -94,7 +94,7 @@ print("Starting in...")
 leds_color('GREEN')
 for n, f in [(3, 600), (2, 800), (1, 1000)]:
     print(n)
-    sound.play_tone(f, 300)   # beep
+    
     time.sleep(0.5)
 
 print("Go!")
