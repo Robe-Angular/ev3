@@ -5,9 +5,10 @@ from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C, SpeedPercent
 from ev3dev2.sensor.lego import ColorSensor, TouchSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
 from ev3dev2.sound import Sound
+from ev3dev2.led import Leds
 import time, os, csv
 
-# ----- Motors -----
+# ----------------- Motores -----------------
 lm = LargeMotor(OUTPUT_B)
 rm = LargeMotor(OUTPUT_C)
 lm.stop_action = 'brake'
@@ -15,7 +16,15 @@ rm.stop_action = 'brake'
 lm.polarity = 'inversed'
 rm.polarity = 'inversed'
 
-# ----- Constants for corner logic -----
+# ----------------- Leds & sonido -----------------
+leds = Leds()
+sound = Sound()
+
+def leds_color(color):
+    leds.set_color('LEFT', color)
+    leds.set_color('RIGHT', color)
+
+# ----------------- Constantes esquinas -----------------
 OPPOSITE_LOCK_MS = 700   # ignore opposite side this time window
 CENTER_GATE_MS   = 150   # min time with center dark to allow lane change
 CORNER_PIVOT_MS  = 180   # pivot duration in corners
@@ -26,39 +35,43 @@ TIGHT_K          = 8
 side_lock_until = 0.0
 now = lambda: time.time()
 
-# ----- Sensors -----
+# ----------------- Sensores -----------------
 csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
 csC = ColorSensor(INPUT_2); csC.mode = 'COL-REFLECT'
 csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
 
-sound = Sound()
-
 # ---------- Touch helper ----------
 def wait_press_release():
+    """Esperar a que se presione y luego se suelte el botón."""
     while not touch.is_pressed:
         time.sleep(0.01)
     while touch.is_pressed:
         time.sleep(0.01)
 
-# ---------- Quick calibration ----------
+# ===================== CALIBRACIÓN =====================
+
 print("Place robot over WHITE line area and press touch...")
-sound.speak("Vel com locked")   # fun voice line
+leds_color('GREEN')
+sound.speak("Vel com locked")     # linea divertida
 wait_press_release()
+
 whiteL = csL.reflected_light_intensity
 whiteC = csC.reflected_light_intensity
 whiteR = csR.reflected_light_intensity
 
 print("Now place it over BLACK line and press touch...")
+leds_color('AMBER')
 sound.speak("Targets designated")
 wait_press_release()
+
 blackL = csL.reflected_light_intensity
 blackC = csC.reflected_light_intensity
 blackR = csR.reflected_light_intensity
 
-# Thresholds with hysteresis
-def mid(a,b): 
-    return (a+b)/2
+# ---------- Thresholds con histéresis ----------
+def mid(a, b):
+    return (a + b) / 2.0
 
 thL = mid(whiteL, blackL)
 thC = mid(whiteC, blackC)
@@ -70,37 +83,45 @@ thC_on, thC_off = thC + HYST, thC - HYST
 thR_on, thR_off = thR + HYST, thR - HYST
 
 print("Thresholds:", round(thL,1), round(thC,1), round(thR,1))
-print("Press touch again to ARM the robot (start position).")
+print("Ready to start, press touch.")
+leds_color('RED')
 sound.speak("Go ahead Tac com. Press the button when you are ready to start.")
 wait_press_release()
 
-# Little countdown before starting the loop
-for f in (800, 900, 1000):
-    sound.play_tone(f, 150)
-    time.sleep(0.15)
+# ===================== CUENTA REGRESIVA =====================
 
-print("Starting line follower...")
-# ---------- CSV logging ----------
+print("Starting in...")
+leds_color('GREEN')
+for n, f in [(3, 600), (2, 800), (1, 1000)]:
+    print(n)
+    sound.play_tone(f, 300)   # beep
+    time.sleep(0.5)
+
+print("Go!")
+sound.speak("Go")
+
+# ===================== CSV logging =====================
 os.makedirs("/home/robot/logs", exist_ok=True)
 path = "/home/robot/logs/line_edge_{0}.csv".format(time.strftime("%Y%m%d_%H%M%S"))
 f = open(path, "w", newline="")
 writer = csv.writer(f)
 writer.writerow(["t","L","C","R","cmdL","cmdR","state","last_side"])
 
-# ---------- Parameters ----------
-BASE_BASE   = 12         # lowered a bit (was 18)
-TURN_BASE   = 18
-BOOST_BASE  = 28
-SEARCH_SLOW = 10
+# ===================== Parámetros seguidor =====================
+# Sube un poco las velocidades para asegurar movimiento
+BASE_BASE   = 18         # antes 12
+TURN_BASE   = 26
+BOOST_BASE  = 34
+SEARCH_SLOW = 12
 DT          = 0.02
 WIDTH_FACTOR = 1.35
 
 BASE  = BASE_BASE
 TURN  = int(TURN_BASE  * WIDTH_FACTOR)
 BOOST = int(BOOST_BASE * (0.9 + 0.2*WIDTH_FACTOR))
-SPIN  = int(14 * WIDTH_FACTOR)
+SPIN  = int(20 * WIDTH_FACTOR)
 
-FOLLOW_LEFT = False      # False = follow right edge (like you had)
+FOLLOW_LEFT = False      # False = seguir borde derecho
 last_side = -1 if FOLLOW_LEFT else 1
 sawL = sawC = sawR = False
 t0 = time.time()
@@ -117,13 +138,17 @@ kP = 1.0 * WIDTH_FACTOR
 def clamp(x, a=-100, b=100):
     return max(a, min(b, x))
 
+# ===================== BUCLE PRINCIPAL =====================
+print("Starting line follower...")
+leds_color('GREEN')
+
 try:
     while True:
         L = csL.reflected_light_intensity
         C = csC.reflected_light_intensity
         R = csR.reflected_light_intensity
 
-        # Hysteresis booleans
+        # ---- Histeresis booleans ----
         if not sawL: sawL = (L < thL_on)
         else:        sawL = (L < thL_off)
 
@@ -137,10 +162,10 @@ try:
         cmdL = cmdR = BASE
         line_detected = sawL or sawC or sawR
 
-        # --- Filters: lock & center gate ---
+        # ---- Filtros: lock & center gate ----
         if not FOLLOW_LEFT and now() < side_lock_until:
             sawL = False
-        if  FOLLOW_LEFT and now() < side_lock_until:
+        if FOLLOW_LEFT and now() < side_lock_until:
             sawR = False
 
         if sawC:
@@ -149,7 +174,7 @@ try:
         else:
             center_dark_since = None
 
-        # Remember last side
+        # ---- Recordar último lado ----
         if FOLLOW_LEFT:
             if sawL:
                 last_side = -1
@@ -167,7 +192,7 @@ try:
                  and (now() - center_dark_since >= CENTER_GATE_MS/1000.0):
                 last_side = -1
 
-        # Cross / curve logic
+        # ---- Lógica curvas/cruces ----
         if (sawL and sawR) or (sawL and sawC and not sawR) or (sawR and sawC and not sawL):
             t_both_dark += DT
             bias = 6 if FOLLOW_LEFT else -6
@@ -199,7 +224,7 @@ try:
                     cmdR = clamp(base_now + TURN//2)
                     state = "RECOVER_L"
             else:
-                # Right edge
+                # ----- Borde derecho -----
                 if now() < corner_until:
                     cmdL = clamp(MIN_BASE_CORNER + BOOST)
                     cmdR = clamp(-REV_INNER)
@@ -229,7 +254,7 @@ try:
                     state = "RECOVER_R"
 
         else:
-            # LOST line
+            # ---- Línea perdida ----
             state = "SEARCH"
             if t_lost is None:
                 t_lost = time.time()
@@ -255,12 +280,14 @@ try:
                 if lost_time > 1.2:
                     t_lost = time.time()
 
+        # ---- Ejecutar comandos ----
         lm.on(SpeedPercent(cmdL))
         rm.on(SpeedPercent(cmdR))
 
         writer.writerow([round(time.time()-t0,2), L, C, R, cmdL, cmdR, state, last_side])
         f.flush()
 
+        # Tocar otra vez para parar
         if touch.is_pressed:
             lm.stop(); rm.stop()
             break
@@ -272,5 +299,6 @@ except KeyboardInterrupt:
 finally:
     lm.stop(); rm.stop()
     f.close()
+    leds_color('RED')
     print("CSV saved at:", path)
-    sound.speak("Acknowledged H.Q.")
+    sound.speak("Acknowledged H Q")
