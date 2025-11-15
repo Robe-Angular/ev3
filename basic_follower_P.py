@@ -108,18 +108,17 @@ writer = csv.writer(f)
 writer.writerow(["t","L","C","R","cmdL","cmdR","state","last_side"])
 
 # ===================== Parámetros seguidor =====================
-# Sube un poco las velocidades para asegurar movimiento
-BASE_BASE   = 18         # antes 12
-TURN_BASE   = 26
-BOOST_BASE  = 34
-SEARCH_SLOW = 12
+BASE_BASE   = 8        # recta muy lenta
+TURN_BASE   = 10       # giros suaves
+BOOST_BASE  = 14       # poco boost
+SEARCH_SLOW = 5        # avance muy lento cuando está perdido
 DT          = 0.02
-WIDTH_FACTOR = 1.35
+WIDTH_FACTOR = 1.0     # sin agresividad extra
 
 BASE  = BASE_BASE
 TURN  = int(TURN_BASE  * WIDTH_FACTOR)
 BOOST = int(BOOST_BASE * (0.9 + 0.2*WIDTH_FACTOR))
-SPIN  = int(20 * WIDTH_FACTOR)
+SPIN  = 6              # giro MUY suave en búsqueda
 
 FOLLOW_LEFT = False      # False = seguir borde derecho
 last_side = -1 if FOLLOW_LEFT else 1
@@ -135,7 +134,7 @@ def with_turn_ramp(base, turn):
 
 kP = 1.0 * WIDTH_FACTOR
 
-def clamp(x, a=-100, b=100):
+def clamp(x, a=-15, b=15):   # antes -100,100
     return max(a, min(b, x))
 
 # ===================== BUCLE PRINCIPAL =====================
@@ -260,25 +259,22 @@ try:
                 t_lost = time.time()
             lost_time = time.time() - t_lost
 
-            spin = SPIN
-            if last_side <= 0:
-                cmdL = -spin; cmdR =  spin
-            else:
-                cmdL =  spin; cmdR = -spin
-
-            if now() < side_lock_until:
-                mini = SPIN
-                if FOLLOW_LEFT:
-                    cmdL = -mini; cmdR = mini
-                else:
-                    cmdL = mini;  cmdR = -mini
-
-            if lost_time > 0.8:
-                state = "SEARCH_FWD"
+            if lost_time < 0.7:
+                # primero avanza recto MUY despacio, a ver si reencuentra la línea
                 cmdL = SEARCH_SLOW
                 cmdR = SEARCH_SLOW
-                if lost_time > 1.2:
-                    t_lost = time.time()
+            else:
+                # luego un giro suave, NO trompo
+                if last_side <= 0:
+                    cmdL = -SPIN
+                    cmdR =  SPIN
+                else:
+                    cmdL =  SPIN
+                    cmdR = -SPIN
+
+            # si lleva mucho tiempo perdido, reiniciamos el contador
+            if lost_time > 2.5:
+                t_lost = time.time()
 
         # ---- Ejecutar comandos ----
         lm.on(SpeedPercent(cmdL))
