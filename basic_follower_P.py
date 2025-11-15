@@ -8,21 +8,21 @@ from ev3dev2.sound import Sound
 from ev3dev2.led import Leds
 import time
 
-# ----- Motores -----
+# ----- Motors -----
 lm = LargeMotor(OUTPUT_B)
 rm = LargeMotor(OUTPUT_C)
 lm.stop_action = rm.stop_action = 'brake'
-# Si “adelante” te sale al revés, deja estos en 'inversed'; si no, bórralos.
+# Deja 'inversed' si físicamente los motores están al revés:
 lm.polarity = 'inversed'
 rm.polarity = 'inversed'
 
-# ----- Sensores -----
+# ----- Sensors -----
 L = ColorSensor(INPUT_1); L.mode = 'COL-REFLECT'
 C = ColorSensor(INPUT_2); C.mode = 'COL-REFLECT'
 R = ColorSensor(INPUT_3); R.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
 
-# ----- Audio y LEDs -----
+# ----- Audio & LEDs -----
 sound = Sound()
 leds = Leds()
 
@@ -30,97 +30,106 @@ def clamp(x, a=-100, b=100):
     return max(a, min(b, x))
 
 def norm(v, w, b):
-    # Normaliza 0..1 (0=negro, 1=blanco) y evita divisiones raras
+    # Normalize 0..1  (0=black, 1=white)
     return clamp((v - b) / max(1.0, (w - b)), 0.0, 1.0)
 
 def wait_press_release():
-    while not touch.is_pressed: time.sleep(0.01)
-    while touch.is_pressed: time.sleep(0.01)
+    while not touch.is_pressed: 
+        time.sleep(0.01)
+    while touch.is_pressed: 
+        time.sleep(0.01)
 
-# ---------- CALIBRACIÓN ----------
-leds.set_color('LEFT',  'AMBER'); leds.set_color('RIGHT', 'AMBER')
-sound.play_tone(600, 150); time.sleep(0.15)  # ping de inicio
+# ---------- CALIBRATION ----------
+leds.set_color('LEFT',  'AMBER')
+leds.set_color('RIGHT', 'AMBER')
+sound.play_tone(600, 150); time.sleep(0.15)  # ping
 
-print("Coloca los SENSORES sobre BLANCO y pulsa el touch...")
-sound.speak("Coloca sensores sobre blanco y presiona el botón")
+print("Place the SENSORS over WHITE and press the touch sensor...")
+sound.speak("Place sensors over white and press the button")
 wait_press_release()
-wL, wC, wR = L.reflected_light_intensity, C.reflected_light_intensity, R.reflected_light_intensity
+wL = L.reflected_light_intensity
+wC = C.reflected_light_intensity
+wR = R.reflected_light_intensity
 sound.beep()
 
-print("Ahora sobre NEGRO y pulsa el touch...")
-sound.speak("Ahora sobre negro y presiona el botón")
+print("Now place them over BLACK and press the touch sensor...")
+sound.speak("Now over black and press the button")
 wait_press_release()
-bL, bC, bR = L.reflected_light_intensity, C.reflected_light_intensity, R.reflected_light_intensity
+bL = L.reflected_light_intensity
+bC = C.reflected_light_intensity
+bR = R.reflected_light_intensity
 sound.beep()
 
-# ----- Parámetros FÁCILES -----
-BASE   = 5   # bájala si aún va rápido (10–14)
-Kp     = 38   # 30–50 típico
-SLOW_K = 12   # suaviza base en curva
-DT     = 0.02
+# ---------- EASY PARAMETERS ----------
+BASE       = 12   # base speed (if too fast, try 10 or 11)
+MIN_BASE   = 10   # minimum real speed (motor needs this to move)
+Kp         = 35   # proportional gain (lower = smoother, higher = more aggressive)
+SLOW_K     = 10   # how much we slow down in curves
+DT         = 0.02
 
-SPIN = 18         # giro al buscar
-SPIN_TIME = 0.25  # s
+SPIN       = 20       # spin speed when line is lost
+SPIN_TIME  = 0.25     # seconds spinning
 
 last_error = 0.0
 
-# ---------- CONFIRMAR INICIO (no arranca solo) ----------
-leds.set_color('LEFT',  'GREEN'); leds.set_color('RIGHT', 'GREEN')
-print("Calibrado. Listo. Pulsa el touch para INICIAR.")
-sound.speak("Calibrado. Listo para iniciar. Presiona el botón para empezar.")
+# ---------- READY TO START (no auto start) ----------
+leds.set_color('LEFT',  'GREEN')
+leds.set_color('RIGHT', 'GREEN')
+print("Calibrated. Ready. Press touch sensor to START.")
+sound.speak("Calibration complete. Ready to start. Press the button to begin.")
 wait_press_release()
 
-# Countdown 3-2-1 con beeps
+# Countdown 3-2-1 with beeps
 for f in (800, 900, 1000):
     sound.play_tone(f, 150)
     time.sleep(0.15)
 
-leds.set_color('LEFT',  'GREEN'); leds.set_color('RIGHT', 'GREEN')
-leds.set(Leds.LEFT,  brightness_pct=1.0, color='GREEN')
-leds.set(Leds.RIGHT, brightness_pct=1.0, color='GREEN')
+print("Starting line following loop...")
+sound.speak("Go!")
+leds.set_color('LEFT',  'GREEN')
+leds.set_color('RIGHT', 'GREEN')
 
-# ---------- LOOP PRINCIPAL ----------
+# ---------- MAIN LOOP ----------
 try:
     while True:
-        # LED parpadeo suave para indicar "corriendo"
-        leds.set_color('LEFT',  'GREEN')
-        leds.set_color('RIGHT', 'GREEN')
-
-        # Lecturas normalizadas (0=negro, 1=blanco)
+        # Read and normalize (0=black, 1=white)
         nL = norm(L.reflected_light_intensity, wL, bL)
         nC = norm(C.reflected_light_intensity, wC, bC)
         nR = norm(R.reflected_light_intensity, wR, bR)
 
-        # Error principal: diferencia L-R
-        error = (nL - nR)  # >0 → línea hacia derecha → girar derecha
+        # Error from left-right difference
+        error = (nL - nR)  # >0 means line more on the right side
 
-        # Baja base en curvas; menos penalización si centro está oscuro
+        # Base speed with slowdown in curves
         curve_factor = abs(error)
-        base_now = max(8, BASE - int(SLOW_K * curve_factor * (0.6 + 0.4*(1.0 - nC))))
+        base_now = BASE - SLOW_K * curve_factor * (0.6 + 0.4 * (1.0 - nC))
+        base_now = max(MIN_BASE, int(base_now))
+
         turn = int(Kp * error)
 
-        left  = clamp(base_now - turn)
-        right = clamp(base_now + turn)
+        left_speed  = clamp(base_now - turn)
+        right_speed = clamp(base_now + turn)
 
-        # Pérdida de línea (todo claro) → giro corto hacia el último lado
+        # If everything is “white” → probably lost the line → small spin
         if nL > 0.9 and nC > 0.9 and nR > 0.9:
             if last_error >= 0:
-                left, right =  SPIN, -SPIN
+                left_speed, right_speed =  SPIN, -SPIN
             else:
-                left, right = -SPIN,  SPIN
+                left_speed, right_speed = -SPIN,  SPIN
             t_end = time.time() + SPIN_TIME
             while time.time() < t_end:
-                lm.on(SpeedPercent(left)); rm.on(SpeedPercent(right))
+                lm.on(SpeedPercent(left_speed))
+                rm.on(SpeedPercent(right_speed))
                 time.sleep(DT)
         else:
-            lm.on(SpeedPercent(left))
-            rm.on(SpeedPercent(right))
+            lm.on(SpeedPercent(left_speed))
+            rm.on(SpeedPercent(right_speed))
 
-        # STOP inmediato con touch
+        # STOP with touch sensor
         if touch.is_pressed:
             lm.stop(); rm.stop()
             sound.play_tone(500, 120)
-            sound.play_tone(350, 200)  # “bajada” de stop
+            sound.play_tone(350, 200)
             break
 
         last_error = error
@@ -130,4 +139,5 @@ except KeyboardInterrupt:
     pass
 finally:
     lm.stop(); rm.stop()
-    leds.set_color('LEFT',  'RED'); leds.set_color('RIGHT', 'RED')
+    leds.set_color('LEFT',  'RED')
+    leds.set_color('RIGHT', 'RED')
