@@ -1,166 +1,276 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-print("PROGRAM START")  # <<< debug
-
 from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C, SpeedPercent
 from ev3dev2.sensor.lego import ColorSensor, TouchSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
-import time
-
-# ----- Audio & LEDs (con fallback) -----
-try:
-    from ev3dev2.sound import Sound
-    sound = Sound()
-    print("Sound OK")
-except Exception as e:
-    sound = None
-    print("Sound init FAILED:", e)
-
-try:
-    from ev3dev2.led import Leds
-    leds = Leds()
-    print("LEDs OK")
-except Exception as e:
-    leds = None
-    print("LED init FAILED:", e)
+from ev3dev2.sound import Sound
+import time, os, csv
 
 # ----- Motors -----
-print("Init motors...")
 lm = LargeMotor(OUTPUT_B)
 rm = LargeMotor(OUTPUT_C)
-lm.stop_action = rm.stop_action = 'brake'
+lm.stop_action = 'brake'
+rm.stop_action = 'brake'
 lm.polarity = 'inversed'
 rm.polarity = 'inversed'
-print("Motors ready")
+
+# ----- Constants for corner logic -----
+OPPOSITE_LOCK_MS = 700   # ignore opposite side this time window
+CENTER_GATE_MS   = 150   # min time with center dark to allow lane change
+CORNER_PIVOT_MS  = 180   # pivot duration in corners
+REV_INNER        = 16
+MIN_BASE_CORNER  = 6
+TIGHT_K          = 8
+
+side_lock_until = 0.0
+now = lambda: time.time()
 
 # ----- Sensors -----
-print("Init sensors...")
-L = ColorSensor(INPUT_1); L.mode = 'COL-REFLECT'
-C = ColorSensor(INPUT_2); C.mode = 'COL-REFLECT'
-R = ColorSensor(INPUT_3); R.mode = 'COL-REFLECT'
+csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
+csC = ColorSensor(INPUT_2); csC.mode = 'COL-REFLECT'
+csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
-print("Sensors ready")
 
-def clamp(x, a=-100, b=100):
-    return max(a, min(b, x))
+sound = Sound()
 
-def norm(v, w, b):
-    return clamp((v - b) / max(1.0, (w - b)), 0.0, 1.0)
-
+# ---------- Touch helper ----------
 def wait_press_release():
     while not touch.is_pressed:
         time.sleep(0.01)
     while touch.is_pressed:
         time.sleep(0.01)
 
-# ---------- CALIBRATION ----------
-print("Calibration: WHITE step")
-if leds: 
-    leds.set_color('LEFT','AMBER'); leds.set_color('RIGHT','AMBER')
-if sound:
-    sound.play_tone(600,150); time.sleep(0.15)
-else:
-    print("No sound available for ping")
-
-print("Place the SENSORS over WHITE and press the touch sensor...")
-if sound:
-    sound.speak("Place sensors over white and press the button")
+# ---------- Quick calibration ----------
+print("Place robot over WHITE line area and press touch...")
+sound.speak("Vel com locked")   # fun voice line
 wait_press_release()
-wL = L.reflected_light_intensity
-wC = C.reflected_light_intensity
-wR = R.reflected_light_intensity
-print("WHITE values:", wL, wC, wR)
-if sound: sound.beep()
+whiteL = csL.reflected_light_intensity
+whiteC = csC.reflected_light_intensity
+whiteR = csR.reflected_light_intensity
 
-print("Now place them over BLACK and press the touch sensor...")
-if sound:
-    sound.speak("Now over black and press the button")
+print("Now place it over BLACK line and press touch...")
+sound.speak("Targets designated")
 wait_press_release()
-bL = L.reflected_light_intensity
-bC = C.reflected_light_intensity
-bR = R.reflected_light_intensity
-print("BLACK values:", bL, bC, bR)
-if sound: sound.beep()
+blackL = csL.reflected_light_intensity
+blackC = csC.reflected_light_intensity
+blackR = csR.reflected_light_intensity
 
-# ---------- PARAMETERS ----------
-BASE       = 12
-MIN_BASE   = 10
-Kp         = 35
-SLOW_K     = 10
-DT         = 0.02
+# Thresholds with hysteresis
+def mid(a,b): 
+    return (a+b)/2
 
-SPIN       = 20
-SPIN_TIME  = 0.25
+thL = mid(whiteL, blackL)
+thC = mid(whiteC, blackC)
+thR = mid(whiteR, blackR)
+HYST = 2.0
 
-last_error = 0.0
+thL_on, thL_off = thL + HYST, thL - HYST
+thC_on, thC_off = thC + HYST, thC - HYST
+thR_on, thR_off = thR + HYST, thR - HYST
 
-# ---------- READY TO START ----------
-print("Calibrated. Ready. Press touch sensor to START.")
-if leds:
-    leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
-if sound:
-    sound.speak("Calibration complete. Ready to start. Press the button to begin.")
+print("Thresholds:", round(thL,1), round(thC,1), round(thR,1))
+print("Press touch again to ARM the robot (start position).")
+sound.speak("Go ahead Tac com. Press the button when you are ready to start.")
 wait_press_release()
 
-if sound:
-    for f in (800,900,1000):
-        sound.play_tone(f,150)
-        time.sleep(0.15)
-    sound.speak("Go!")
-print("Starting line following loop...")
+# Little countdown before starting the loop
+for f in (800, 900, 1000):
+    sound.play_tone(f, 150)
+    time.sleep(0.15)
 
-if leds:
-    leds.set_color('LEFT','GREEN'); leds.set_color('RIGHT','GREEN')
+print("Starting line follower...")
+# ---------- CSV logging ----------
+os.makedirs("/home/robot/logs", exist_ok=True)
+path = "/home/robot/logs/line_edge_{0}.csv".format(time.strftime("%Y%m%d_%H%M%S"))
+f = open(path, "w", newline="")
+writer = csv.writer(f)
+writer.writerow(["t","L","C","R","cmdL","cmdR","state","last_side"])
 
-# ---------- MAIN LOOP ----------
+# ---------- Parameters ----------
+BASE_BASE   = 12         # lowered a bit (was 18)
+TURN_BASE   = 18
+BOOST_BASE  = 28
+SEARCH_SLOW = 10
+DT          = 0.02
+WIDTH_FACTOR = 1.35
+
+BASE  = BASE_BASE
+TURN  = int(TURN_BASE  * WIDTH_FACTOR)
+BOOST = int(BOOST_BASE * (0.9 + 0.2*WIDTH_FACTOR))
+SPIN  = int(14 * WIDTH_FACTOR)
+
+FOLLOW_LEFT = False      # False = follow right edge (like you had)
+last_side = -1 if FOLLOW_LEFT else 1
+sawL = sawC = sawR = False
+t0 = time.time()
+t_both_dark = 0.0
+t_lost = None
+center_dark_since = None
+corner_until = 0.0
+
+def with_turn_ramp(base, turn):
+    return max(10, base - abs(turn)//3)
+
+kP = 1.0 * WIDTH_FACTOR
+
+def clamp(x, a=-100, b=100):
+    return max(a, min(b, x))
+
 try:
     while True:
-        nL = norm(L.reflected_light_intensity, wL, bL)
-        nC = norm(C.reflected_light_intensity, wC, bC)
-        nR = norm(R.reflected_light_intensity, wR, bR)
+        L = csL.reflected_light_intensity
+        C = csC.reflected_light_intensity
+        R = csR.reflected_light_intensity
 
-        error = (nL - nR)
+        # Hysteresis booleans
+        if not sawL: sawL = (L < thL_on)
+        else:        sawL = (L < thL_off)
 
-        curve_factor = abs(error)
-        base_now = BASE - SLOW_K * curve_factor * (0.6 + 0.4*(1.0-nC))
-        base_now = max(MIN_BASE, int(base_now))
+        if not sawC: sawC = (C < thC_on)
+        else:        sawC = (C < thC_off)
 
-        turn = int(Kp * error)
+        if not sawR: sawR = (R < thR_on)
+        else:        sawR = (R < thR_off)
 
-        left_speed  = clamp(base_now - turn)
-        right_speed = clamp(base_now + turn)
+        state = "RUN"
+        cmdL = cmdR = BASE
+        line_detected = sawL or sawC or sawR
 
-        if nL>0.9 and nC>0.9 and nR>0.9:
-            print("Line LOST, spinning. last_error =", last_error)
-            if last_error >= 0:
-                left_speed, right_speed =  SPIN, -SPIN
-            else:
-                left_speed, right_speed = -SPIN,  SPIN
-            t_end = time.time() + SPIN_TIME
-            while time.time() < t_end:
-                lm.on(SpeedPercent(left_speed))
-                rm.on(SpeedPercent(right_speed))
-                time.sleep(DT)
+        # --- Filters: lock & center gate ---
+        if not FOLLOW_LEFT and now() < side_lock_until:
+            sawL = False
+        if  FOLLOW_LEFT and now() < side_lock_until:
+            sawR = False
+
+        if sawC:
+            if center_dark_since is None:
+                center_dark_since = now()
         else:
-            lm.on(SpeedPercent(left_speed))
-            rm.on(SpeedPercent(right_speed))
+            center_dark_since = None
+
+        # Remember last side
+        if FOLLOW_LEFT:
+            if sawL:
+                last_side = -1
+            elif sawC:
+                pass
+            elif sawR and (now() > side_lock_until) and (center_dark_since is not None) \
+                 and (now() - center_dark_since >= CENTER_GATE_MS/1000.0):
+                last_side = 1
+        else:
+            if sawR:
+                last_side = 1
+            elif sawC:
+                pass
+            elif sawL and (now() > side_lock_until) and (center_dark_since is not None) \
+                 and (now() - center_dark_since >= CENTER_GATE_MS/1000.0):
+                last_side = -1
+
+        # Cross / curve logic
+        if (sawL and sawR) or (sawL and sawC and not sawR) or (sawR and sawC and not sawL):
+            t_both_dark += DT
+            bias = 6 if FOLLOW_LEFT else -6
+            base_now = with_turn_ramp(BASE, bias)
+            cmdL = clamp(base_now - bias)
+            cmdR = clamp(base_now + bias)
+            state = "CROSS_LOCK"
+            t_lost = None
+
+        elif line_detected:
+            t_both_dark = 0.0
+            t_lost = None
+
+            if FOLLOW_LEFT:
+                if sawL:
+                    err  = max(0.0, (thL - L))
+                    turn = clamp(int(kP * err), -BOOST, BOOST)
+                    if (not sawC) and (L < thL - 6):
+                        turn = clamp(BOOST, -BOOST, BOOST)
+                    base_now = with_turn_ramp(BASE, turn)
+                    cmdL = clamp(base_now - turn)
+                    cmdR = clamp(base_now + turn)
+                    state = "EDGE_L"
+                elif sawC:
+                    cmdL = BASE; cmdR = BASE; state = "CENTER"
+                elif sawR:
+                    base_now = with_turn_ramp(BASE, TURN//2)
+                    cmdL = clamp(base_now - TURN//2)
+                    cmdR = clamp(base_now + TURN//2)
+                    state = "RECOVER_L"
+            else:
+                # Right edge
+                if now() < corner_until:
+                    cmdL = clamp(MIN_BASE_CORNER + BOOST)
+                    cmdR = clamp(-REV_INNER)
+                    state = "CORNER_R_HOLD"
+                elif sawR:
+                    if (not sawC) and (R < thR - TIGHT_K):
+                        side_lock_until = now() + OPPOSITE_LOCK_MS/1000.0
+                        corner_until    = now() + CORNER_PIVOT_MS/1000.0
+                        cmdL = clamp(MIN_BASE_CORNER + BOOST)
+                        cmdR = clamp(-REV_INNER)
+                        state = "CORNER_R"
+                    else:
+                        err  = max(0.0, (thR - R))
+                        turn = clamp(int(kP * err), -BOOST, BOOST)
+                        if (not sawC) and (R < thR - 6):
+                            turn = clamp(BOOST, -BOOST, BOOST)
+                        base_now = with_turn_ramp(BASE, turn)
+                        cmdL = clamp(base_now + turn)
+                        cmdR = clamp(base_now - turn)
+                        state = "EDGE_R"
+                elif sawC:
+                    cmdL = BASE; cmdR = BASE; state = "CENTER"
+                elif sawL:
+                    base_now = with_turn_ramp(BASE, TURN//2)
+                    cmdL = clamp(base_now + TURN//2)
+                    cmdR = clamp(base_now - TURN//2)
+                    state = "RECOVER_R"
+
+        else:
+            # LOST line
+            state = "SEARCH"
+            if t_lost is None:
+                t_lost = time.time()
+            lost_time = time.time() - t_lost
+
+            spin = SPIN
+            if last_side <= 0:
+                cmdL = -spin; cmdR =  spin
+            else:
+                cmdL =  spin; cmdR = -spin
+
+            if now() < side_lock_until:
+                mini = SPIN
+                if FOLLOW_LEFT:
+                    cmdL = -mini; cmdR = mini
+                else:
+                    cmdL = mini;  cmdR = -mini
+
+            if lost_time > 0.8:
+                state = "SEARCH_FWD"
+                cmdL = SEARCH_SLOW
+                cmdR = SEARCH_SLOW
+                if lost_time > 1.2:
+                    t_lost = time.time()
+
+        lm.on(SpeedPercent(cmdL))
+        rm.on(SpeedPercent(cmdR))
+
+        writer.writerow([round(time.time()-t0,2), L, C, R, cmdL, cmdR, state, last_side])
+        f.flush()
 
         if touch.is_pressed:
-            print("Touch pressed: STOP")
             lm.stop(); rm.stop()
-            if sound:
-                sound.play_tone(500,120); sound.play_tone(350,200)
             break
 
-        last_error = error
         time.sleep(DT)
 
 except KeyboardInterrupt:
-    print("KeyboardInterrupt, exiting...")
-
+    pass
 finally:
     lm.stop(); rm.stop()
-    if leds:
-        leds.set_color('LEFT','RED'); leds.set_color('RIGHT','RED')
-    print("PROGRAM END")
+    f.close()
+    print("CSV saved at:", path)
+    sound.speak("Acknowledged H.Q.")
