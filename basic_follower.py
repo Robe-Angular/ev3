@@ -43,14 +43,14 @@ def wait_press_release():
 
 # ---------- Quick calibration ----------
 print("Place robot over WHITE line area and press touch...")
-sound.speak("Vel com locked")   # fun voice line
+# sound.speak("Vel com locked")   # fun voice line
 wait_press_release()
 whiteL = csL.reflected_light_intensity
 whiteC = csC.reflected_light_intensity
 whiteR = csR.reflected_light_intensity
 
 print("Now place it over BLACK line and press touch...")
-sound.speak("Targets designated")
+# sound.speak("Targets designated")
 wait_press_release()
 blackL = csL.reflected_light_intensity
 blackC = csC.reflected_light_intensity
@@ -71,7 +71,7 @@ thR_on, thR_off = thR + HYST, thR - HYST
 
 print("Thresholds:", round(thL,1), round(thC,1), round(thR,1))
 print("Press touch again to ARM the robot (start position).")
-sound.speak("Go ahead Tac com. Press the button when you are ready to start.")
+# sound.speak("Go ahead Tac com. Press the button when you are ready to start.")
 wait_press_release()
 
 # Little countdown before starting the loop
@@ -273,4 +273,4 @@ finally:
     lm.stop(); rm.stop()
     f.close()
     print("CSV saved at:", path)
-    sound.speak("Acknowledged H.Q.")
+    # sound.speak("Acknowledged H.Q.")
