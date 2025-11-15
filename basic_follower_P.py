@@ -11,8 +11,8 @@ lm = LargeMotor(OUTPUT_B)
 rm = LargeMotor(OUTPUT_C)
 lm.stop_action = rm.stop_action = 'brake'
 # Si “adelante” te sale al revés, descomenta:
-# lm.polarity = 'inversed'
-# rm.polarity = 'inversed'
+lm.polarity = 'inversed'
+rm.polarity = 'inversed'
 
 # ----- Sensores -----
 L = ColorSensor(INPUT_1); L.mode = 'COL-REFLECT'
