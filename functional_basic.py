@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-# lf_simple3_log.py
+# lf_simple3_log_hq.py
 #
-# Seguidor de línea sencillo con 3 sensores:
-# - Reglas básicas (izq / centro / der / perdido)
+# Seguidor de línea SIMPLE con 3 sensores:
+# - Reglas básicas (LEFT / CENTER / RIGHT / LOST)
 # - LENTO y estable
-# - Sin FSM loca (ni CROSS_LOCK, ni EDGE, etc.)
-# - Cuenta regresiva con sonidos
+# - START/STOP con TouchSensor
 # - LOG a CSV: t,L,C,R,cmdL,cmdR,state,last_side
+# - Frases: "Acknowledged HQ, Vel com locked, Targets designated"
 #
-# START/STOP con TouchSensor en INPUT_4
+# Conecta:
+#   Motores: B = IZQUIERDO, C = DERECHO
+#   ColorSensor: L = INPUT_1, C = INPUT_2, R = INPUT_3
+#   TouchSensor: INPUT_4
 
 from ev3dev2.motor import LargeMotor, OUTPUT_B, OUTPUT_C, SpeedPercent
 from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
@@ -20,21 +23,19 @@ import csv
 import os
 
 # =====================
-#  CONFIGURACIÓN BÁSICA
+#  MOTORES Y SENSORES
 # =====================
 
-# Motores (ajusta OUTPUT_B / OUTPUT_C si cambiás cables)
 lm = LargeMotor(OUTPUT_B)   # motor izquierdo
 rm = LargeMotor(OUTPUT_C)   # motor derecho
 
-# Si el robot se va para atrás, cambia 'inversed' -> 'normal'
+# Si se va hacia atrás, cambia 'inversed' por 'normal'
 lm.polarity = 'inversed'
 rm.polarity = 'inversed'
 
 lm.stop_action = 'brake'
 rm.stop_action = 'brake'
 
-# Sensores de color L, C, R
 csL = ColorSensor(INPUT_1)
 csC = ColorSensor(INPUT_2)
 csR = ColorSensor(INPUT_3)
@@ -42,54 +43,49 @@ csR = ColorSensor(INPUT_3)
 for cs in [csL, csC, csR]:
     cs.mode = 'COL-REFLECT'
 
-# Touch para arrancar/detener
 touch = TouchSensor(INPUT_4)
-
-# Sonido
 sound = Sound()
 
 # =====================
-#  PARÁMETROS DEL CONTROL
+#  PARÁMETROS
 # =====================
 
-BASE_SPEED = 12        # velocidad recto
-TURN_FAST = 14        # rueda externa
-TURN_SLOW = 4         # rueda interna
-SEARCH_TURN = 10      # cuando se pierde la línea
+BASE_SPEED   = 10     # velocidad recto (bajita para estabilidad)
+TURN_FAST    = 12     # rueda exterior en giro
+TURN_SLOW    = 4      # rueda interior en giro
+SEARCH_TURN  = 8      # al estar perdido, giro suave sobre su eje
 
-# Umbral de negro: ajústalo según tu pista
-BLACK_THRESHOLD = 35
+BLACK_THRESHOLD = 35  # AJUSTA según tu pista (negro < este valor)
 
-# Periodo del loop (segundos)
-DT = 0.03
+DT = 0.03             # periodo del loop (segundos)
 
 
 # =====================
-#  LÓGICA SIMPLE DEL SEGUIDOR
+#  LÓGICA DEL CONTROL
 # =====================
 
 def follow_step(last_side):
     """
-    Un paso de control:
-    - Lee L, C, R
-    - Decide velocidades de cada motor
-    - Devuelve: last_side, state, vL, vR, L, C, R
+    Un paso del seguidor simple:
+    Lee sensores y aplica reglas básicas.
+
+    Devuelve:
+    last_side, state, vL, vR, L, C, R
     """
     L = csL.reflected_light_intensity
     C = csC.reflected_light_intensity
     R = csR.reflected_light_intensity
 
-    # Flags de negro
     L_BLACK = (L < BLACK_THRESHOLD)
     C_BLACK = (C < BLACK_THRESHOLD)
     R_BLACK = (R < BLACK_THRESHOLD)
 
-    # Por default: avanzar recto
+    state = "CENTER"
     vL = BASE_SPEED
     vR = BASE_SPEED
-    state = "CENTER"
 
-    # ---- REGLAS SIMPLES ----
+    # ---- Reglas sencillas ----
+
     if C_BLACK and not L_BLACK and not R_BLACK:
         # Línea al centro
         state = "CENTER"
@@ -111,55 +107,62 @@ def follow_step(last_side):
         last_side = 1
 
     elif C_BLACK and L_BLACK and not R_BLACK:
-        # Centro + izquierda
+        # Centro + izquierda (ligera curva izq)
         state = "LEFT"
         vL = TURN_SLOW
         vR = TURN_FAST
         last_side = -1
 
     elif C_BLACK and R_BLACK and not L_BLACK:
-        # Centro + derecha
+        # Centro + derecha (ligera curva der)
         state = "RIGHT"
         vL = TURN_FAST
         vR = TURN_SLOW
         last_side = 1
 
     elif L_BLACK and C_BLACK and R_BLACK:
-        # Los tres negros
+        # Los tres negros -> recto pero despacio
         state = "CENTER"
         vL = BASE_SPEED
         vR = BASE_SPEED
 
     else:
-        # Perdido (todo blanco o raro)
+        # Todo blanco o raro -> LOST (buscar)
         state = "LOST"
         if last_side < 0:
-            # Buscar girando hacia la izquierda
+            # veníamos de izquierda
             vL = -SEARCH_TURN
             vR = SEARCH_TURN
         elif last_side > 0:
-            # Buscar girando hacia la derecha
+            # veníamos de derecha
             vL = SEARCH_TURN
             vR = -SEARCH_TURN
         else:
-            # Aún no sabemos, avanza despacio
+            # sin historial, avanza muy lento
             vL = 5
             vR = 5
 
-    # Aplicar velocidades
+    # Aplicar comandos a los motores
     lm.on(SpeedPercent(vL))
     rm.on(SpeedPercent(vR))
 
     return last_side, state, vL, vR, L, C, R
 
 
+def hq_intro():
+    # Frases mamalonas antes de arrancar
+    sound.speak("Acknowledged, H Q.")
+    sound.speak("Vel com locked.")
+    sound.speak("Targets designated.")
+
+
 def countdown():
-    sound.speak("Preparado")
-    time.sleep(0.5)
+    sound.speak("Ready.")
+    time.sleep(0.3)
     for n in [3, 2, 1]:
         sound.speak(str(n))
-        time.sleep(0.4)
-    sound.speak("Ya")
+        time.sleep(0.3)
+    sound.speak("Go.")
 
 
 def wait_for_touch_release():
@@ -168,46 +171,45 @@ def wait_for_touch_release():
 
 
 def make_log_writer():
-    """
-    Crea carpeta logs/ y abre un CSV nuevo con timestamp.
-    Devuelve (csv_writer, file_handle) para que el main lo use.
-    """
     os.makedirs("logs", exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
-    filename = os.path.join("logs", "lf_simple_%s.csv" % ts)
-
+    filename = os.path.join("logs", "lf_simple3_hq_%s.csv" % ts)
     f = open(filename, "w", newline="")
     writer = csv.writer(f)
-    # Header compatible con lo que me mandas:
     writer.writerow(["t", "L", "C", "R", "cmdL", "cmdR", "state", "last_side"])
     return writer, f, filename
 
 
 def main():
-    sound.speak("Seguidor simple con log listo")
+    sound.speak("Simple line follower ready.")
 
     while True:
-        print("Pulsa el touch para comenzar a seguir la linea...")
+        print("Pulsa el touch para comenzar...")
         while not touch.is_pressed:
             time.sleep(0.01)
         wait_for_touch_release()
 
-        # Crear nuevo log por corrida
         writer, f, filename = make_log_writer()
         print("Log CSV:", filename)
 
+        # Intro tipo HQ + cuenta regresiva
+        hq_intro()
         countdown()
 
-        last_side = 0
         t0 = time.time()
-        print("Siguiendo linea... Pulsa touch para detener.")
+        last_side = 0  # -1 = venía de izq, 1 = der, 0 = ninguno
+
+        print("Siguiendo línea... Pulsa touch para detener.")
 
         try:
             while not touch.is_pressed:
-                last_side, state, vL, vR, L, C, R = follow_step(last_side)
+                (last_side,
+                 state,
+                 vL, vR,
+                 L, C, R) = follow_step(last_side)
+
                 t = time.time() - t0
 
-                # Guardar fila en CSV
                 writer.writerow([
                     "%.2f" % t,
                     L, C, R,
@@ -217,15 +219,15 @@ def main():
                 ])
 
                 time.sleep(DT)
+
         finally:
-            # Siempre asegurarnos de cerrar archivo y parar motores
             lm.off()
             rm.off()
             f.close()
             print("Log guardado en:", filename)
 
         wait_for_touch_release()
-        sound.speak("Detenido")
+        sound.speak("Stopped.")
 
 
 if __name__ == "__main__":
