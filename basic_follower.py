@@ -7,113 +7,115 @@ from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
 from ev3dev2.sound import Sound
 import time, os, csv
 
+# ----- Motors -----
 lm = LargeMotor(OUTPUT_B)
 rm = LargeMotor(OUTPUT_C)
 lm.stop_action = 'brake'
 rm.stop_action = 'brake'
+lm.polarity = 'inversed'
+rm.polarity = 'inversed'
 
-OPPOSITE_LOCK_MS = 700   # antes 350
-CENTER_GATE_MS   = 150   # tiempo mínimo con C oscuro para permitir cambio de carril
-CORNER_PIVOT_MS  = 180   # tiempo que mantiene el pivot en esquina
-REV_INNER        = 16    # más reversa en rueda interna
-MIN_BASE_CORNER  = 6     # menor base en la esquina
+# ----- Constants for corner logic -----
+OPPOSITE_LOCK_MS = 700   # ignore opposite side this time window
+CENTER_GATE_MS   = 150   # min time with center dark to allow lane change
+CORNER_PIVOT_MS  = 180   # pivot duration in corners
+REV_INNER        = 16
+MIN_BASE_CORNER  = 6
+TIGHT_K          = 8
 
-TIGHT_K = 8 
-
-side_lock_until = 0.0  # (state) tiempo hasta el que ignoramos el lado opuesto
+side_lock_until = 0.0
 now = lambda: time.time()
 
+# ----- Sensors -----
 csL = ColorSensor(INPUT_1); csL.mode = 'COL-REFLECT'
 csC = ColorSensor(INPUT_2); csC.mode = 'COL-REFLECT'
 csR = ColorSensor(INPUT_3); csR.mode = 'COL-REFLECT'
 touch = TouchSensor(INPUT_4)
-# ✨ Arregla que "adelante" esté yendo "atrás"
-lm.polarity = 'inversed'
-rm.polarity = 'inversed'
+
 sound = Sound()
-# ---------- Calibración rápida ----------
+
+# ---------- Touch helper ----------
 def wait_press_release():
-    while not touch.is_pressed: time.sleep(0.01)
-    while touch.is_pressed: time.sleep(0.01)
+    while not touch.is_pressed:
+        time.sleep(0.01)
+    while touch.is_pressed:
+        time.sleep(0.01)
 
-print("Coloca sobre BLANCO y pulsa...")
-# sound.speak("VelCom locked")   # Alistando robot
+# ---------- Quick calibration ----------
+print("Place robot over WHITE line area and press touch...")
+sound.speak("Vel com locked")   # fun voice line
 wait_press_release()
-whiteL, whiteC, whiteR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
+whiteL = csL.reflected_light_intensity
+whiteC = csC.reflected_light_intensity
+whiteR = csR.reflected_light_intensity
 
-print("Ahora sobre NEGRO y pulsa...")
-
+print("Now place it over BLACK line and press touch...")
+sound.speak("Targets designated")
 wait_press_release()
-# sound.speak("Targets Designated")   #Alistando robot
-blackL, blackC, blackR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
+blackL = csL.reflected_light_intensity
+blackC = csC.reflected_light_intensity
+blackR = csR.reflected_light_intensity
 
-# Umbral base y márgenes de histeresis
-def mid(a,b): return (a+b)/2
-thL = mid(whiteL, blackL); thC = mid(whiteC, blackC); thR = mid(whiteR, blackR)
-HYST = 2.0  # súbele si parpadea (1–5)
+# Thresholds with hysteresis
+def mid(a,b): 
+    return (a+b)/2
+
+thL = mid(whiteL, blackL)
+thC = mid(whiteC, blackC)
+thR = mid(whiteR, blackR)
+HYST = 2.0
 
 thL_on, thL_off = thL + HYST, thL - HYST
 thC_on, thC_off = thC + HYST, thC - HYST
 thR_on, thR_off = thR + HYST, thR - HYST
 
-print("Umbrales:", round(thL,1), round(thC,1), round(thR,1))
-print("Pulsa otra vez para empezar.")
+print("Thresholds:", round(thL,1), round(thC,1), round(thR,1))
+print("Press touch again to ARM the robot (start position).")
+sound.speak("Go ahead Tac com. Press the button when you are ready to start.")
 wait_press_release()
-# sound.speak("Go ahead TACCOM")   #Alistando robot
-# ---------- CSV ----------
+
+# Little countdown before starting the loop
+for f in (800, 900, 1000):
+    sound.play_tone(f, 150)
+    time.sleep(0.15)
+
+print("Starting line follower...")
+# ---------- CSV logging ----------
 os.makedirs("/home/robot/logs", exist_ok=True)
 path = "/home/robot/logs/line_edge_{0}.csv".format(time.strftime("%Y%m%d_%H%M%S"))
 f = open(path, "w", newline="")
-import csv
 writer = csv.writer(f)
 writer.writerow(["t","L","C","R","cmdL","cmdR","state","last_side"])
 
-# ---------- Parámetros ----------
-BASE_BASE  = 18         # velocidad base
-TURN_BASE  = 18         # giro normal
-BOOST_BASE = 28         # pulso fuerte en curva cerrada
-SEARCH_SLOW = 10   # velocidad en search
-DT    = 0.02       # ciclo (s)
+# ---------- Parameters ----------
+BASE_BASE   = 12         # lowered a bit (was 18)
+TURN_BASE   = 18
+BOOST_BASE  = 28
+SEARCH_SLOW = 10
+DT          = 0.02
 WIDTH_FACTOR = 1.35
-
 
 BASE  = BASE_BASE
 TURN  = int(TURN_BASE  * WIDTH_FACTOR)
-BOOST = int(BOOST_BASE * (0.9 + 0.2*WIDTH_FACTOR))  # un poco menos agresivo que TURN
-SPIN  = int(14 * WIDTH_FACTOR)  # para SEARCH
+BOOST = int(BOOST_BASE * (0.9 + 0.2*WIDTH_FACTOR))
+SPIN  = int(14 * WIDTH_FACTOR)
 
-
-
-FOLLOW_LEFT = False     # True: sigue borde izquierdo | False: derecho
-last_side = -1 if FOLLOW_LEFT else 1   # -1=izq, +1=der
+FOLLOW_LEFT = False      # False = follow right edge (like you had)
+last_side = -1 if FOLLOW_LEFT else 1
 sawL = sawC = sawR = False
 t0 = time.time()
 t_both_dark = 0.0
 t_lost = None
 center_dark_since = None
 corner_until = 0.0
-# --- Filtros de lock/puerta central ---
-# 2.1 Si hay lock, ignora el lado opuesto
-if not FOLLOW_LEFT and now() < side_lock_until:
-    sawL = False
-if  FOLLOW_LEFT and now() < side_lock_until:
-    sawR = False
 
-# 2.2 Puerta central: exige C oscuro un rato para permitir cambio de carril
-if sawC:
-    if center_dark_since is None:
-        center_dark_since = now()
-else:
-    center_dark_since = None
-
-
-# Rampa: baja base cuando el giro es grande
 def with_turn_ramp(base, turn):
     return max(10, base - abs(turn)//3)
 
-# Ganancia proporcional (ajusta 0.8–1.6 * WIDTH_FACTOR si zigzaguea)
 kP = 1.0 * WIDTH_FACTOR
-def clamp(x, a=-100, b=100): return max(a, min(b, x))
+
+def clamp(x, a=-100, b=100):
+    return max(a, min(b, x))
 
 try:
     while True:
@@ -121,11 +123,13 @@ try:
         C = csC.reflected_light_intensity
         R = csR.reflected_light_intensity
 
-        # Booleans con histeresis
+        # Hysteresis booleans
         if not sawL: sawL = (L < thL_on)
         else:        sawL = (L < thL_off)
+
         if not sawC: sawC = (C < thC_on)
         else:        sawC = (C < thC_off)
+
         if not sawR: sawR = (R < thR_on)
         else:        sawR = (R < thR_off)
 
@@ -133,20 +137,19 @@ try:
         cmdL = cmdR = BASE
         line_detected = sawL or sawC or sawR
 
-        # --- Filtros de lock/puerta central ---
-        # 1) Si hay lock, ignora lado opuesto
+        # --- Filters: lock & center gate ---
         if not FOLLOW_LEFT and now() < side_lock_until:
             sawL = False
         if  FOLLOW_LEFT and now() < side_lock_until:
             sawR = False
-        # 2) Puerta central: requiere C oscuro un ratito para permitir cambio de carril
+
         if sawC:
             if center_dark_since is None:
                 center_dark_since = now()
         else:
             center_dark_since = None
 
-        # Memoriza último lado visto (prioriza borde elegido)
+        # Remember last side
         if FOLLOW_LEFT:
             if sawL:
                 last_side = -1
@@ -164,7 +167,7 @@ try:
                  and (now() - center_dark_since >= CENTER_GATE_MS/1000.0):
                 last_side = -1
 
-        # ¿Curva/cruceta? (dos sensores ven negro)
+        # Cross / curve logic
         if (sawL and sawR) or (sawL and sawC and not sawR) or (sawR and sawC and not sawL):
             t_both_dark += DT
             bias = 6 if FOLLOW_LEFT else -6
@@ -179,7 +182,6 @@ try:
             t_lost = None
 
             if FOLLOW_LEFT:
-                # ======= Borde izquierdo =======
                 if sawL:
                     err  = max(0.0, (thL - L))
                     turn = clamp(int(kP * err), -BOOST, BOOST)
@@ -197,22 +199,19 @@ try:
                     cmdR = clamp(base_now + TURN//2)
                     state = "RECOVER_L"
             else:
-                # ======= Borde derecho =======
-                # Hold de pivot si venimos de esquina
+                # Right edge
                 if now() < corner_until:
                     cmdL = clamp(MIN_BASE_CORNER + BOOST)
                     cmdR = clamp(-REV_INNER)
                     state = "CORNER_R_HOLD"
                 elif sawR:
-                    # Esquina cerrada
                     if (not sawC) and (R < thR - TIGHT_K):
                         side_lock_until = now() + OPPOSITE_LOCK_MS/1000.0
                         corner_until    = now() + CORNER_PIVOT_MS/1000.0
-                        cmdL = clamp(MIN_BASE_CORNER + BOOST)   # externa rápida
-                        cmdR = clamp(-REV_INNER)                 # interna en reversa
+                        cmdL = clamp(MIN_BASE_CORNER + BOOST)
+                        cmdR = clamp(-REV_INNER)
                         state = "CORNER_R"
                     else:
-                        # Control proporcional normal
                         err  = max(0.0, (thR - R))
                         turn = clamp(int(kP * err), -BOOST, BOOST)
                         if (not sawC) and (R < thR - 6):
@@ -230,7 +229,7 @@ try:
                     state = "RECOVER_R"
 
         else:
-            # Línea perdida: busca hacia donde la viste por última vez
+            # LOST line
             state = "SEARCH"
             if t_lost is None:
                 t_lost = time.time()
@@ -242,7 +241,6 @@ try:
             else:
                 cmdL =  spin; cmdR = -spin
 
-            # Anti-salto si el lock sigue activo: mini-pivot hacia tu borde
             if now() < side_lock_until:
                 mini = SPIN
                 if FOLLOW_LEFT:
@@ -250,7 +248,6 @@ try:
                 else:
                     cmdL = mini;  cmdR = -mini
 
-            # Peinado
             if lost_time > 0.8:
                 state = "SEARCH_FWD"
                 cmdL = SEARCH_SLOW
@@ -274,6 +271,6 @@ except KeyboardInterrupt:
     pass
 finally:
     lm.stop(); rm.stop()
-    # sound.speak("Acknowledged H.Q.")   #Alistando robot
     f.close()
-    print("CSV guardado:", path)
+    print("CSV saved at:", path)
+    sound.speak("Acknowledged H.Q.")
