@@ -112,7 +112,7 @@ def calibrate():
     thrR = (wR + bR) / 2.0
 
     print("Thresholds L,C,R:", thrL, thrC, thrR)
-    sound.speak("Calibration done.")
+    sound.speak("Vel com locked.")
 
 
 # =====================
@@ -203,18 +203,18 @@ def follow_step(last_side):
 
 
 def hq_intro():
-    sound.speak("Acknowledged, H Q.")
-    sound.speak("Vel com locked.")
+    
+    
     sound.speak("Targets designated.")
 
 
 def countdown():
-    sound.speak("Ready.")
+    
     time.sleep(0.3)
     for n in [3, 2, 1]:
         sound.speak(str(n))
         time.sleep(0.3)
-    sound.speak("Go.")
+    sound.speak("Go Ahead TACCOM.")
 
 
 def make_log_writer():
@@ -228,7 +228,7 @@ def make_log_writer():
 
 
 def main():
-    sound.speak("Simple line follower ready. Starting calibration.")
+    sound.speak("Com link online.")
     calibrate()  # ----> se hace UNA vez al inicio
 
     while True:
@@ -245,7 +245,7 @@ def main():
         t0 = time.time()
         last_side = 0
 
-        print("Siguiendo línea... Pulsa touch para detener.")
+        print("Pulsa touch para detener.")
 
         try:
             while not touch.is_pressed:
@@ -271,7 +271,7 @@ def main():
             rm.off()
             f.close()
             print("Log guardado en:", filename)
-            sound.speak("Stopped.")
+            sound.speak("Acknowledged, H Q.")
             wait_for_touch_release()
 
 
