@@ -1,0 +1,4 @@
+K=5
+DIST=euclidean
+USE_PROTOTYPES=1
+USE_ZSCORE=0
