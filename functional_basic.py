@@ -202,18 +202,13 @@ def follow_step(last_side):
     return last_side, state, vL, vR, L, C, R
 
 
-def hq_intro():
+
     
     
-    sound.speak("Targets designated.")
 
 
 def countdown():
     
-    time.sleep(0.3)
-    for n in [3, 2, 1]:
-        sound.speak(str(n))
-        time.sleep(0.3)
     sound.speak("Go Ahead TACCOM.")
 
 
@@ -228,18 +223,18 @@ def make_log_writer():
 
 
 def main():
-    sound.speak("Com link online.")
+    sound.speak("Com link on-line.")
     calibrate()  # ----> se hace UNA vez al inicio
 
     while True:
-        sound.speak("Press the button to start.")
+        sound.speak("Targets Designated.")
         wait_for_touch_press()
         wait_for_touch_release()
 
         writer, f, filename = make_log_writer()
         print("Log CSV:", filename)
 
-        hq_intro()
+        
         countdown()
 
         t0 = time.time()
