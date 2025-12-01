@@ -44,7 +44,8 @@ print("NEGROS :", blackL, blackC, blackR)
 perceptron = PerceptronPortable("./export_perc", mode="calib")
 perceptron.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
-FWD, TURN = 5, 20
+# FWD, TURN = 5, 20
+FWD, TURN = 10, 25
 map_cmd = {
     "LEFT":   (FWD - TURN, FWD + TURN),
     "CENTER": (FWD,        FWD),
