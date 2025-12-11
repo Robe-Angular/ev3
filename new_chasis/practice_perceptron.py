@@ -50,7 +50,7 @@ perceptron = PerceptronPortable(perc_dir, mode="calib")
 perceptron.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # FWD, TURN = 5, 20
-FWD, TURN = -7, -15
+FWD, TURN = -9, -15
 map_cmd = {
     "LEFT":   (FWD - TURN, FWD + TURN),
     "CENTER": (FWD,        FWD),
