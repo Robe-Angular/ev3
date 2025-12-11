@@ -47,7 +47,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # carpeta de este script
 knn_dir = os.path.join(BASE_DIR, "export_knn")
 
 print("Cargando Log Reg desde:", knn_dir)  # opcional, para verificar en consola
-knn = KNNPortable("knn_dir", k=5, dist="euclidean", mode="calib")
+knn = KNNPortable(knn_dir, k=5, dist="euclidean", mode="calib")
 knn.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # --- Mapeo de clases a velocidades ---
