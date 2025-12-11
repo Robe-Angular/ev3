@@ -26,11 +26,16 @@ wait_press_release()
 blackL, blackC, blackR = csL.reflected_light_intensity, csC.reflected_light_intensity, csR.reflected_light_intensity
 
 # Model
-logr = LogisticPortable("./export_logreg", mode="calib")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # carpeta de este script
+logreg_dir = os.path.join(BASE_DIR, "export_logreg")
+
+print("Cargando Log Reg desde:", logreg_dir)  # opcional, para verificar en consola
+
+logr = LogisticPortable(logreg_dir, mode="calib")
 logr.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # Motion map (always include forward to avoid spinning in place)
-FWD, TURN = 5, 20
+FWD, TURN = -7, -15
 map_cmd = {
     "LEFT":   (FWD - TURN, FWD + TURN),
     "CENTER": (FWD,        FWD),

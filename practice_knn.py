@@ -6,6 +6,7 @@ from ev3dev2.sensor.lego import ColorSensor, TouchSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
 from knn_ev3 import KNNPortable
 import time
+import os
 
 # --- Hardware ---
 lm = LargeMotor(OUTPUT_B)
@@ -41,11 +42,18 @@ print("BLANCOS:", whiteL, whiteC, whiteR)
 print("NEGROS :", blackL, blackC, blackR)
 
 # --- Crear y configurar el modelo ---
-knn = KNNPortable("./export_knn", k=5, dist="euclidean", mode="calib")
+# --- Crear y configurar el modelo ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # carpeta de este script
+knn_dir = os.path.join(BASE_DIR, "export_knn")
+
+print("Cargando KNN desde:", knn_dir)  # opcional, para verificar en consola
+
+
+knn = KNNPortable(path=knn_dir, k=5, dist="euclidean", mode="calib")
 knn.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # --- Mapeo de clases a velocidades ---
-FWD, TURN = 5, 20
+FWD, TURN = -7, -15
 map_cmd = {
     "LEFT":   (FWD - TURN, FWD + TURN),
     "CENTER": (FWD,        FWD),

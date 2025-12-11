@@ -6,6 +6,7 @@ from ev3dev2.sensor.lego import ColorSensor, TouchSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
 from svm_ev3 import SVMPortable
 import time
+import os
 
 # --- Hardware ---
 lm = LargeMotor(OUTPUT_B)
@@ -41,12 +42,20 @@ print("BLANCOS:", whiteL, whiteC, whiteR)
 print("NEGROS :", blackL, blackC, blackR)
 
 # --- Crear y configurar el modelo ---
-svm = SVMPortable("./export_svm", mode="calib")
+
+# --- Crear y configurar el modelo ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # carpeta de este script
+svm_dir = os.path.join(BASE_DIR, "export_svm")
+
+print("Cargando SVM desde:", svm_dir)  # opcional, para verificar en consola
+
+svm = SVMPortable(path=svm_dir, mode="calib")
+
 svm.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # --- Mapeo de clases a velocidades ---
-FWD = 5    # empuje hacia adelante
-TURN = 20   # componente de giro
+FWD = -7    # empuje hacia adelante
+TURN = -15   # componente de giro
 
 map_cmd = {
     "LEFT":   (FWD - TURN, FWD + TURN),   # = ( -2, 22 )  aprox

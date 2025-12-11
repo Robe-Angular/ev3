@@ -6,6 +6,7 @@ from ev3dev2.sensor.lego import ColorSensor, TouchSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2, INPUT_3, INPUT_4
 from perceptron_ev3 import PerceptronPortable
 import time
+import os
 
 # --- Hardware ---
 lm = LargeMotor(OUTPUT_B)
@@ -41,11 +42,15 @@ print("BLANCOS:", whiteL, whiteC, whiteR)
 print("NEGROS :", blackL, blackC, blackR)
 
 # --- Crear y configurar el modelo ---
-perceptron = PerceptronPortable("./export_perc", mode="calib")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # carpeta de este script
+perc_dir = os.path.join(BASE_DIR, "export_perc")
+
+print("Cargando Log Reg desde:", perc_dir)  # opcional, para verificar en consola
+perceptron = PerceptronPortable(perc_dir, mode="calib")
 perceptron.set_calibration(whiteL, whiteC, whiteR, blackL, blackC, blackR)
 
 # FWD, TURN = 5, 20
-FWD, TURN = 10, 25
+FWD, TURN = -7, -15
 map_cmd = {
     "LEFT":   (FWD - TURN, FWD + TURN),
     "CENTER": (FWD,        FWD),
